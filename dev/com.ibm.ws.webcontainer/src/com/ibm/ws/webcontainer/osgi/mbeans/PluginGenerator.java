@@ -529,10 +529,13 @@ public class PluginGenerator {
                                 sslProp1.setAttribute("Value", pcd.KeyringLocation);
                                 tElem.appendChild(sslProp1);
 
-                                Element sslProp2 = output.createElement("Property");
-                                sslProp2.setAttribute("Name", "stashfile");
-                                sslProp2.setAttribute("Value", pcd.StashfileLocation);
-                                tElem.appendChild(sslProp2);
+                                // safkeyring does not require a stashfile
+                                if (!pcd.KeyringLocation.substring(0,9).equalsIgnoreCase("safkeyring")) {
+                                    Element sslProp2 = output.createElement("Property");
+                                    sslProp2.setAttribute("Name", "stashfile");
+                                    sslProp2.setAttribute("Value", pcd.StashfileLocation);
+                                    tElem.appendChild(sslProp2);
+                                }
 
                                 if (pcd.CertLabel != null) {
                                     Element sslProp3 = output.createElement("Property");
