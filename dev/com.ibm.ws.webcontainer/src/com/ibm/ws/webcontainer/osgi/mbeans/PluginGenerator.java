@@ -1068,8 +1068,8 @@ public class PluginGenerator {
         }
 
         if (findVirtualHosts) {
-            boolean foundWildcardWebserverHttp = false;
-            boolean foundWildcardWebserverHttps = false;
+            boolean foundWebserverHttpHostAlias = false;
+            boolean foundWebserverHttpsHostAlias = false;
 
             // identify virtual hosts based on virtual hosts used by applications
             for (Iterator<DynamicVirtualHost> i = vhostMgr.getVirtualHosts(); i.hasNext();) {
@@ -1116,19 +1116,22 @@ public class PluginGenerator {
 
                     for (String alias : vh_aliases) {
                         if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                            Tr.debug(tc, "adding " + vh.getName() + " -> " + alias);
+                            Tr.debug(tc, "iterating on virtual host " + vh.getName());
                         }
 
                         VHostData vh_alias = new VHostData(alias);
+
+                        if (vh_alias.port == pcd.webServerHttpPort) {
+                            foundWebserverHttpHostAlias = true;
+                        } else if (vh_alias.port == pcd.webServerHttpsPort) {
+                            foundWebserverHttpsHostAlias = true;
+                        } else {
+                            Tr.debug(tc, "Alias '{}' not added to plugin-cfg.xml; its port does not match either webserver ports {} and {}", alias, pcd.webServerHttpPort, pcd.webServerHttpsPort);
+                            continue; // Skip adding this virtual host alias
+                        }
+                        Tr.debug(tc, "adding " + vh.getName() + " -> " + alias);
                         vh_aliasData.add(vh_alias);
                         mapPortUsage(portToVHostNameMap, vh_name, vh_alias);
-
-                        if (vh_alias.host.equals("*")) {
-                            if (vh_alias.port == pcd.webServerHttpPort)
-                                foundWildcardWebserverHttp = true;
-                            if (vh_alias.port == pcd.webServerHttpsPort)
-                                foundWildcardWebserverHttps = true;
-                        }
                     }
 
                     // save the list of constructed VHostData
@@ -1138,7 +1141,7 @@ public class PluginGenerator {
 
             // If we can, make sure we have aliases for the web server ports..
             List<VHostData> vh_aliasData = vhostAliasData.get(DEFAULT_VIRTUAL_HOST);
-            if (pcd.webServerHttpPort > 0 && !foundWildcardWebserverHttp) {
+            if (pcd.webServerHttpPort > 0 && !foundWebserverHttpHostAlias) {
                 if (defaultHostIsCatchAll
                     && vh_aliasData != null
                     && !blockedByRestrictions(defaultHost.getProperty(HTTP_ALLOWED_ENDPOINT))) {
@@ -1154,7 +1157,7 @@ public class PluginGenerator {
                 }
             }
 
-            if (pcd.webServerHttpsPort > 0 && !foundWildcardWebserverHttps) {
+            if (pcd.webServerHttpsPort > 0 && !foundWebserverHttpsHostAlias) {
                 if (defaultHostIsCatchAll
                     && vh_aliasData != null
                     && !blockedByRestrictions(defaultHost.getProperty(HTTP_ALLOWED_ENDPOINT))) {
