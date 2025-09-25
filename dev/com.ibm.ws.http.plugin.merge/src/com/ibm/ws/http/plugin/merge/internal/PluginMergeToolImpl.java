@@ -87,7 +87,9 @@ public class PluginMergeToolImpl implements PluginMergeTool {
     private final boolean failOver = true; /* 654526 */
     // enable precedence by adding "-Dcom.ibm.ws.pluginmerge.precedence=true" to $IBM_JAVA_OPTIONS
     private static boolean precedence = false;
-    // example of enabling debug and precedence: export IBM_JAVA_OPTIONS="-Dcom.ibm.ws.pluginmerge.debug=true -Dcom.ibm.ws.pluginmerge.precedence=true"
+    // enable advanced merge by adding "-Dcom.ibm.ws.pluginmerge.advanced=true" to $IBM_JAVA_OPTIONS
+    private static boolean advanced = false;
+    // example of enabling debug and advanced: export IBM_JAVA_OPTIONS="-Dcom.ibm.ws.pluginmerge.debug=true -Dcom.ibm.ws.pluginmerge.advanced=true"
     private Element mergeConfigNode;
     private static Element mergeConfigNode2; //PI07230
     private PluginInfo[] plugins;
@@ -453,6 +455,124 @@ public class PluginMergeToolImpl implements PluginMergeTool {
         }
     }
 
+    private void advancedMerge() {
+        debug("advancedMerge - Starting intelligent service-based merge");
+        
+        // Step 1: Analyze all URIs across plugins to find common services
+        Hashtable<String, HashSet<Integer>> uriToPlugins = new Hashtable<String, HashSet<Integer>>();
+        
+        for (int i = 0; i < plugins.length; i++) {
+            Hashtable<String, AppInfo> pluginRep = plugins[i].getUniquePluginRep();
+            Enumeration<String> uids = pluginRep.keys();
+            
+            while (uids.hasMoreElements()) {
+                String uid = uids.nextElement();
+                AppInfo appInfo = pluginRep.get(uid);
+                String uriName = appInfo.getUri().getAttribute("Name");
+                
+                if (!uriToPlugins.containsKey(uriName)) {
+                    uriToPlugins.put(uriName, new HashSet<Integer>());
+                }
+                uriToPlugins.get(uriName).add(i);
+            }
+        }
+        
+        // Step 2: For each shared service, create comprehensive shared plugin with ALL routes
+        Enumeration<String> uriNames = uriToPlugins.keys();
+        
+        while (uriNames.hasMoreElements()) {
+            String uriName = uriNames.nextElement();
+            HashSet<Integer> pluginSet = uriToPlugins.get(uriName);
+            
+            if (pluginSet.size() > 1) {
+                debug("advancedMerge - Creating shared service cluster for: " + uriName + " across " + pluginSet.size() + " plugins");
+                
+                try {
+                    // Create shared plugin using first plugin's server cluster as template
+                    int firstPlugin = pluginSet.iterator().next();
+                    Element firstServerCluster = getServerClusterForUri(firstPlugin, uriName);
+                    
+                    if (firstServerCluster != null) {
+                        PluginInfo sharedPlugin = new PluginInfo(seqNum++, firstServerCluster);
+                        
+                        // Add ALL matches for this URI from ALL plugins that have it
+                        for (Integer pluginIndex : pluginSet) {
+                            addAllMatchesForUri(sharedPlugin, pluginIndex, uriName);
+                        }
+                        
+                        sharedPlugins.add(sharedPlugin);
+                        debug("advancedMerge - Created shared plugin for " + uriName + " with " + sharedPlugin.getUniquePluginRep().size() + " routes");
+                    }
+                    
+                } catch (Exception e) {
+                    debug("advancedMerge - Error creating shared plugin for " + uriName + ": " + e.getMessage());
+                    // Fall back to individual handling - don't remove from plugins
+                    continue;
+                }
+                
+                // Only remove URIs from individual plugins if shared plugin was created successfully
+                for (Integer pluginIndex : pluginSet) {
+                    removeUriFromPlugin(pluginIndex, uriName);
+                }
+            }
+        }
+        
+        debug("advancedMerge - Created " + sharedPlugins.size() + " shared service groups");
+    }
+    
+    private Element getServerClusterForUri(int pluginIndex, String uriName) {
+        Hashtable<String, AppInfo> pluginRep = plugins[pluginIndex].getUniquePluginRep();
+        Enumeration<String> uids = pluginRep.keys();
+        
+        while (uids.hasMoreElements()) {
+            String uid = uids.nextElement();
+            AppInfo appInfo = pluginRep.get(uid);
+            if (uriName.equals(appInfo.getUri().getAttribute("Name"))) {
+                return appInfo.getServerCluster();
+            }
+        }
+        return null;
+    }
+    
+    private void addAllMatchesForUri(PluginInfo sharedPlugin, int pluginIndex, String uriName) {
+        Hashtable<String, AppInfo> pluginRep = plugins[pluginIndex].getUniquePluginRep();
+        Enumeration<String> uids = pluginRep.keys();
+        
+        // Add ALL uid entries for this URI (all virtual host combinations)
+        while (uids.hasMoreElements()) {
+            String uid = uids.nextElement();
+            AppInfo appInfo = pluginRep.get(uid);
+            if (uriName.equals(appInfo.getUri().getAttribute("Name"))) {
+                // Add this specific route (uri + vhost combination) to shared plugin
+                try {
+                    sharedPlugin.addMatch(uid, appInfo.getAppName(), appInfo.getServerCluster(), pluginIndex,
+                                        appInfo.getServerCluster(), pluginIndex, appInfo.getUri(), appInfo.getVh());
+                    debug("advancedMerge - Added route: " + uid + " from plugin " + pluginIndex);
+                } catch (Exception e) {
+                    debug("advancedMerge - Failed to add route " + uid + ": " + e.getMessage());
+                }
+            }
+        }
+    }
+    
+    private void removeUriFromPlugin(int pluginIndex, String uriName) {
+        Hashtable<String, AppInfo> pluginRep = plugins[pluginIndex].getUniquePluginRep();
+        Enumeration<String> uids = pluginRep.keys();
+        
+        java.util.List<String> toRemove = new java.util.ArrayList<String>();
+        while (uids.hasMoreElements()) {
+            String uid = uids.nextElement();
+            AppInfo appInfo = pluginRep.get(uid);
+            if (uriName.equals(appInfo.getUri().getAttribute("Name"))) {
+                toRemove.add(uid);
+            }
+        }
+        
+        for (String uid : toRemove) {
+            pluginRep.remove(uid);
+        }
+    }
+
     private void setReasonForUniqueness(PluginInfo pgi1, Hashtable<String, AppInfo> p2) {
         tc = "setReasonForUniqueness - ";
         debug(tc + "Checking Uniqueness.");
@@ -504,6 +624,7 @@ public class PluginMergeToolImpl implements PluginMergeTool {
         matchUriAppVhost = Boolean.getBoolean("com.ibm.ws.pluginmerge.match.appname");
         debug = Boolean.getBoolean("com.ibm.ws.pluginmerge.debug");
         precedence = Boolean.getBoolean("com.ibm.ws.pluginmerge.precedence");
+        advanced = Boolean.getBoolean("com.ibm.ws.pluginmerge.advanced");
 
         //looping through files to see if debug was in the string
         for (int j = 0; j < args.length; j++) {
@@ -770,13 +891,20 @@ public class PluginMergeToolImpl implements PluginMergeTool {
             throw new RuntimeException(t);
         }
         try {
-            if (precedence) {
+            boolean done = false;
+            if (advanced) {
+                toolInstance.advancedMerge();
+                toolInstance.printMergedCopy(mergeFileName);
+                done = validateEach(fileList, mergeFileName);
+            } else if (precedence) {
                 toolInstance.pMerge();
                 toolInstance.printMergedCopy(mergeFileName);
+                // No validation performed here, precedence is experimental and at your own risk, hence why it is not default
+                // Precedence is likely to drop conflicting routes, preferring one XML over another
             } else {
                 int attempts = 0;
                 int shuffles = 0;
-                boolean done = tryLfMerge(toolInstance, fileList, mergeFileName);
+                done = tryLfMerge(toolInstance, fileList, mergeFileName);
                 do {
                     shuffles++;
                     if(shuffles==2) {
@@ -813,11 +941,10 @@ public class PluginMergeToolImpl implements PluginMergeTool {
                     }
                 } while(!done && shuffles < 3);
 
-
-                if(!done) {
+            }
+            if(!done) {
                     throw new RuntimeException(NO_MERGE_ERR);
                 }
-            }
         } catch (Throwable t) {
             throw new RuntimeException(t);
         }
