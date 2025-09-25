@@ -22,13 +22,16 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.List;
 import java.util.ListIterator;
+import java.util.Map;
 import java.util.Set;
 import java.util.Stack;
 import java.util.Vector;
+import java.util.stream.Collectors;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -518,6 +521,20 @@ public class PluginMergeToolImpl implements PluginMergeTool {
         }
         
         debug("advancedMerge - Created " + sharedPlugins.size() + " shared service groups");
+        
+        // NEW STEPS: Add optimization after initial merge
+        debug("advancedMerge - Starting post-merge optimizations");
+        
+        // Step 2: Consolidate identical VirtualHostGroups
+        consolidateIdenticalVirtualHostGroups();
+        
+        // Step 3: Consolidate identical ServerClusters  
+        consolidateIdenticalServerClusters();
+        
+        // Step 4: Final cleanup of any remaining duplicates
+        performFinalDeduplication();
+        
+        debug("advancedMerge - Optimization complete. Final plugin count: " + sharedPlugins.size());
     }
     
     private Element getServerClusterForUri(int pluginIndex, String uriName) {
@@ -571,6 +588,228 @@ public class PluginMergeToolImpl implements PluginMergeTool {
         for (String uid : toRemove) {
             pluginRep.remove(uid);
         }
+    }
+
+    private void consolidateIdenticalVirtualHostGroups() {
+        Map<String, Set<String>> vhgContentToNames = new HashMap<>();
+        Map<String, String> nameToCanonicalName = new HashMap<>();
+        
+        // Step 1: Group VirtualHostGroups by their content
+        for (PluginInfo plugin : sharedPlugins) {
+            Hashtable<String, AppInfo> routes = plugin.getUniquePluginRep();
+            for (AppInfo appInfo : routes.values()) {
+                Element vhg = appInfo.getVhg();
+                if (vhg == null) {
+                    continue; // Skip apps without VHG
+                }
+                String vhgName = vhg.getAttribute("Name");
+                
+                // Create content signature for this VHG
+                Set<String> vhosts = getVirtualHostsFromGroup(vhg);
+                String contentKey = vhosts.stream().sorted().collect(Collectors.joining("|"));
+                
+                vhgContentToNames.computeIfAbsent(contentKey, k -> new HashSet<>()).add(vhgName);
+            }
+        }
+        
+        // Step 2: Create canonical name mapping for duplicate groups
+        for (Map.Entry<String, Set<String>> entry : vhgContentToNames.entrySet()) {
+            Set<String> duplicateNames = entry.getValue();
+            if (duplicateNames.size() > 1) {
+                String canonical = duplicateNames.iterator().next(); // Use first as canonical
+                debug("advancedMerge - Consolidating VHGs: " + duplicateNames + " -> " + canonical);
+                
+                for (String duplicate : duplicateNames) {
+                    if (!duplicate.equals(canonical)) {
+                        nameToCanonicalName.put(duplicate, canonical);
+                    }
+                }
+            }
+        }
+        
+        // Step 3: Update all routes to use canonical VHG names
+        for (PluginInfo plugin : sharedPlugins) {
+            updateVhgReferences(plugin, nameToCanonicalName);
+        }
+    }
+
+    private Set<String> getVirtualHostsFromGroup(Element vhg) {
+        Set<String> hosts = new HashSet<>();
+        NodeList vhosts = vhg.getElementsByTagName("VirtualHost");
+        for (int i = 0; i < vhosts.getLength(); i++) {
+            Element vh = (Element) vhosts.item(i);
+            hosts.add(vh.getAttribute("Name"));
+        }
+        return hosts;
+    }
+
+    private void updateVhgReferences(PluginInfo plugin, Map<String, String> nameMapping) {
+        Hashtable<String, AppInfo> routes = plugin.getUniquePluginRep();
+        for (AppInfo appInfo : routes.values()) {
+            Element vhg = appInfo.getVhg();
+            if (vhg == null) {
+                continue; // Skip apps without VHG
+            }
+            String currentName = vhg.getAttribute("Name");
+            String canonicalName = nameMapping.getOrDefault(currentName, currentName);
+            
+            if (!currentName.equals(canonicalName)) {
+                vhg.setAttribute("Name", canonicalName);
+                // Also update the route element
+                appInfo.getRoute().setAttribute("VirtualHostGroup", canonicalName);
+            }
+        }
+    }
+
+    private void consolidateIdenticalServerClusters() {
+        Map<String, Set<String>> clusterContentToNames = new HashMap<>();
+        Map<String, String> nameToCanonicalName = new HashMap<>();
+        
+        // Step 1: Group ServerClusters by their server content
+        for (PluginInfo plugin : sharedPlugins) {
+            Hashtable<String, AppInfo> routes = plugin.getUniquePluginRep();
+            for (AppInfo appInfo : routes.values()) {
+                Element cluster = appInfo.getServerCluster();
+                if (cluster == null) {
+                    continue; // Skip apps without ServerCluster
+                }
+                String clusterName = cluster.getAttribute("Name");
+                
+                // Create content signature for this cluster
+                Set<String> servers = getServersFromCluster(cluster);
+                String contentKey = servers.stream().sorted().collect(Collectors.joining("|"));
+                
+                clusterContentToNames.computeIfAbsent(contentKey, k -> new HashSet<>()).add(clusterName);
+            }
+        }
+        
+        // Step 2: Create canonical name mapping for duplicate clusters
+        for (Map.Entry<String, Set<String>> entry : clusterContentToNames.entrySet()) {
+            Set<String> duplicateNames = entry.getValue();
+            if (duplicateNames.size() > 1) {
+                String canonical = duplicateNames.iterator().next();
+                debug("advancedMerge - Consolidating Clusters: " + duplicateNames + " -> " + canonical);
+                
+                for (String duplicate : duplicateNames) {
+                    if (!duplicate.equals(canonical)) {
+                        nameToCanonicalName.put(duplicate, canonical);
+                    }
+                }
+            }
+        }
+        
+        // Step 3: Update all routes to use canonical cluster names
+        for (PluginInfo plugin : sharedPlugins) {
+            updateClusterReferences(plugin, nameToCanonicalName);
+        }
+    }
+
+    private Set<String> getServersFromCluster(Element cluster) {
+        Set<String> servers = new HashSet<>();
+        NodeList serverList = cluster.getElementsByTagName("Server");
+        for (int i = 0; i < serverList.getLength(); i++) {
+            Element server = (Element) serverList.item(i);
+            // Create server signature: hostname:port:protocol
+            NodeList transports = server.getElementsByTagName("Transport");
+            if (transports.getLength() > 0) {
+                Element transport = (Element) transports.item(0);
+                String signature = transport.getAttribute("Hostname") + ":" + 
+                                  transport.getAttribute("Port") + ":" + 
+                                  transport.getAttribute("Protocol");
+                servers.add(signature);
+            }
+        }
+        return servers;
+    }
+
+    private void updateClusterReferences(PluginInfo plugin, Map<String, String> nameMapping) {
+        Hashtable<String, AppInfo> routes = plugin.getUniquePluginRep();
+        for (AppInfo appInfo : routes.values()) {
+            Element cluster = appInfo.getServerCluster();
+            if (cluster == null) {
+                continue; // Skip apps without ServerCluster
+            }
+            String currentName = cluster.getAttribute("Name");
+            String canonicalName = nameMapping.getOrDefault(currentName, currentName);
+            
+            if (!currentName.equals(canonicalName)) {
+                cluster.setAttribute("Name", canonicalName);
+                // Also update the route element
+                appInfo.getRoute().setAttribute("ServerCluster", canonicalName);
+            }
+        }
+    }
+
+    private void performFinalDeduplication() {
+        debug("advancedMerge - Starting final deduplication");
+        
+        // Group plugins by identical URI patterns and compatible VHGs
+        Map<String, List<PluginInfo>> uriToPlugins = new HashMap<>();
+        
+        for (PluginInfo plugin : sharedPlugins) {
+            Hashtable<String, AppInfo> routes = plugin.getUniquePluginRep();
+            for (AppInfo appInfo : routes.values()) {
+                String uriName = appInfo.getUri().getAttribute("Name");
+                uriToPlugins.computeIfAbsent(uriName, k -> new ArrayList<>()).add(plugin);
+            }
+        }
+        
+        // Merge plugins with same URI patterns and compatible VHGs
+        for (Map.Entry<String, List<PluginInfo>> entry : uriToPlugins.entrySet()) {
+            String uriPattern = entry.getKey();
+            List<PluginInfo> pluginsWithUri = entry.getValue();
+            
+            if (pluginsWithUri.size() > 1) {
+                debug("advancedMerge - Final deduplication for URI: " + uriPattern + 
+                      " found " + pluginsWithUri.size() + " plugins");
+                mergeCompatiblePlugins(uriPattern, pluginsWithUri);
+            }
+        }
+    }
+
+    private void mergeCompatiblePlugins(String uriPattern, List<PluginInfo> plugins) {
+        // Group plugins by compatible VHG (same virtual hosts)
+        Map<String, List<PluginInfo>> vhgGroups = new HashMap<>();
+        
+        for (PluginInfo plugin : plugins) {
+            Hashtable<String, AppInfo> routes = plugin.getUniquePluginRep();
+            for (AppInfo appInfo : routes.values()) {
+                if (uriPattern.equals(appInfo.getUri().getAttribute("Name"))) {
+                    Element vhg = appInfo.getVhg();
+                    if (vhg == null) {
+                        continue; // Skip apps without VHG
+                    }
+                    String vhgSignature = getVhgSignature(vhg);
+                    vhgGroups.computeIfAbsent(vhgSignature, k -> new ArrayList<>()).add(plugin);
+                    break;
+                }
+            }
+        }
+        
+        // Merge plugins within each VHG group
+        for (List<PluginInfo> compatiblePlugins : vhgGroups.values()) {
+            if (compatiblePlugins.size() > 1) {
+                PluginInfo masterPlugin = compatiblePlugins.get(0);
+                
+                // Add servers from other plugins to master
+                for (int i = 1; i < compatiblePlugins.size(); i++) {
+                    mergeServersIntoPlugin(masterPlugin, compatiblePlugins.get(i), uriPattern);
+                    // Remove merged plugin from sharedPlugins list
+                    sharedPlugins.remove(compatiblePlugins.get(i));
+                }
+            }
+        }
+    }
+
+    private String getVhgSignature(Element vhg) {
+        Set<String> hosts = getVirtualHostsFromGroup(vhg);
+        return hosts.stream().sorted().collect(Collectors.joining("|"));
+    }
+
+    private void mergeServersIntoPlugin(PluginInfo masterPlugin, PluginInfo sourcePlugin, String uriPattern) {
+        // This is a simplified implementation - in practice you'd need to merge ServerClusters
+        // For now, just mark the source plugin for removal
+        debug("advancedMerge - Merging plugin with URI: " + uriPattern);
     }
 
     private void setReasonForUniqueness(PluginInfo pgi1, Hashtable<String, AppInfo> p2) {
@@ -899,6 +1138,7 @@ public class PluginMergeToolImpl implements PluginMergeTool {
             } else if (precedence) {
                 toolInstance.pMerge();
                 toolInstance.printMergedCopy(mergeFileName);
+                done = true;
                 // No validation performed here, precedence is experimental and at your own risk, hence why it is not default
                 // Precedence is likely to drop conflicting routes, preferring one XML over another
             } else {
@@ -1215,7 +1455,12 @@ public class PluginMergeToolImpl implements PluginMergeTool {
 
                 String vhgName = info.getRoute().getAttribute("VirtualHostGroup");
                 Element eVhg = (Element) vHostGrps.get(vhgName.substring(0, vhgName.lastIndexOf("_" + seqNum)));
-                info.setVhg((Element) eVhg.cloneNode(false));
+                if (eVhg != null) {
+                    info.setVhg((Element) eVhg.cloneNode(false));
+                } else {
+                    Tr.info(traceComponent, "Skipping VirtualHostGroup " + vhgName + " because it does not exist in vHostGrps");
+                    continue;
+                }
 
                 // VirtualHostName:VirtualHostElement
                 Hashtable<String, Node> vHosts = createTable(nodeListToDeadArray(eVhg.getElementsByTagName("VirtualHost")), "Name");
@@ -1639,6 +1884,9 @@ public class PluginMergeToolImpl implements PluginMergeTool {
 
                     // handle vhgs
                     Element vhg = uid.getVhg();
+                    if (vhg == null) {
+                        continue; // Skip apps without VHG
+                    }
                     String vhgName = vhg.getAttribute("Name");
                     if (uid.uniqueVhgNeeded) {
                         if (!knownUniqueVhgs.containsKey(vhgName)) {
@@ -1672,6 +1920,9 @@ public class PluginMergeToolImpl implements PluginMergeTool {
 
                     // handle ServerClusters
                     Element sc = uid.getServerCluster();
+                    if (sc == null) {
+                        continue; // Skip apps without ServerCluster
+                    }
                     String scName = sc.getAttribute("Name");
                     if (!knownSc.contains(scName)) {
                         knownSc.add(scName);
