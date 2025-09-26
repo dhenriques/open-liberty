@@ -429,7 +429,12 @@ public class PluginMergeToolImpl implements PluginMergeTool {
                     }
                 }
                 if((matched!=0) && (p1.size()!=matched)) {
-                    debug(tc + "ERROR: Encountered an improperly scoped subset - matched: " + matched + ", total: " + p1.size());
+                    debug(tc + "ERROR: Encountered an improperly scoped subset");
+                    debug(tc + "EXPLANATION: A plugin partially overlaps with a shared plugin (must be all UIDs or none)");
+                    debug(tc + "Route definitions are ServerCluster|VirtualHostGroup|UriGroup combinations");
+                    debug(tc + "Matched UIDs: " + matched + ", Total UIDs in shared plugin: " + p1.size());
+                    debug(tc + "Unmatched UIDs in shared plugin: " + (p1.size() - matched));
+                    debug(tc + "This creates an invalid merge state - shared plugins must be completely consumed or not touched");
                     debug(tc + "EXIT: Merge failed due to improper scoping");
                     return false;
                 } else if (matched > 0) {
@@ -459,6 +464,12 @@ public class PluginMergeToolImpl implements PluginMergeTool {
 
                         // add the app info to the new shared plugin-cfg.xml
                         // if the uid has already been matched once the servers corresposnding to this uid will be updated
+                        debug(tc + "Creating route definition for shared UID '" + uid + "'");
+                        debug(tc + "Route definition combines: ServerCluster + VirtualHostGroup + UriGroup");
+                        debug(tc + "  ServerCluster from plugin " + j + ": " + (p1AppInfo.getServerCluster() != null ? p1AppInfo.getServerCluster().getAttribute("Name") : "null"));
+                        debug(tc + "  ServerCluster from plugin " + i + ": " + (p2AppInfo.getServerCluster() != null ? p2AppInfo.getServerCluster().getAttribute("Name") : "null"));
+                        debug(tc + "  URI: " + p1AppInfo.getUri());
+                        debug(tc + "  VirtualHost: " + p1AppInfo.getVh());
                         newSharedPlugin.addMatch(uid, p1AppInfo.getAppName(), p1AppInfo.getServerCluster(), plugins[j].getSeqNum(),
                                                  p2AppInfo.getServerCluster(), plugins[i].getSeqNum(), p1AppInfo.getUri(), p1AppInfo.getVh());
 
@@ -728,7 +739,8 @@ public class PluginMergeToolImpl implements PluginMergeTool {
                 vhGrp = route.getAttribute("VirtualHostGroup"); // vhGrpNames
                 uriGrp = route.getAttribute("UriGroup"); // uriGrpNames
 
-                debug(f.getName() + ": " + cluster + "|" + vhGrp + "|" + uriGrp);
+                debug("ROUTE DEFINITION: " + f.getName() + ": ServerCluster=" + cluster + " | VirtualHostGroup=" + vhGrp + " | UriGroup=" + uriGrp);
+                debug("Route format is ServerCluster|VirtualHostGroup|UriGroup - each route defines how requests are routed to servers");
 
                 // use keys from inner hashtable
                 Enumeration<String> serverKeys = clusterNames.get(cluster).keys();
