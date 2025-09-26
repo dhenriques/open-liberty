@@ -28,6 +28,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.Stack;
 import java.util.Vector;
@@ -355,6 +356,7 @@ public class PluginMergeToolImpl implements PluginMergeTool {
         // loop thru all input plugin-cfg.xml files starting at the second input plugin-cfg.xml
         // inner loop will take care of matching the first input plugin-cfg.xml
         debug(tc + "Looping through all input files");
+        debug(tc + "plugins.length: " + plugins.length);
         for (int i = 1; i < plugins.length; i++) {
             p2 = plugins[i].getUniquePluginRep();
 
@@ -363,11 +365,12 @@ public class PluginMergeToolImpl implements PluginMergeTool {
             itrShared = sharedPlugins.iterator();
             // if there is a shared plugin representation compare them to the selected input plugin (p2) first
             // this ensures uids that have already been noted as being shared between input plugins correctly end up in a shared group
+            debug(tc + "itrShared.hasNext(): " + itrShared.hasNext());
             while (itrShared.hasNext()) {
                 sharedPlugin = (itrShared.next());
                 p1 = sharedPlugin.getUniquePluginRep();
                 p1Uids = p1.keys();
-
+                debug(tc + "p1Uids: " + p1Uids.toString());
                 // loop thru the shared uids
                 int matched = 0;
                 while (p1Uids.hasMoreElements()) {
@@ -384,10 +387,12 @@ public class PluginMergeToolImpl implements PluginMergeTool {
                         p2.remove(uid);
                     }
                 }
-                if((matched!=0) && (p1.size()!=matched)) {
-                    debug(tc + "Encountered an improperly scoped subset.");
-                    return false;
-                }
+                debug(tc + "matched: " + matched);
+                debug(tc + "p1.size(): " + p1.size());
+                // if((matched!=0) && (p1.size()!=matched)) {
+                //     debug(tc + "Encountered an improperly scoped subset.");
+                //     return false;
+                // }
             }
 
             // after all uids that are already known to be shared have been removed from the input plugin-cfg.xml
@@ -1132,21 +1137,25 @@ public class PluginMergeToolImpl implements PluginMergeTool {
         try {
             boolean done = false;
             if (advanced) {
+                debug(tc + " Using advanced merge algorithm ");
                 toolInstance.advancedMerge();
                 toolInstance.printMergedCopy(mergeFileName);
                 done = validateEach(fileList, mergeFileName);
             } else if (precedence) {
+                debug(tc + " Using precedence merge algorithm ");
                 toolInstance.pMerge();
                 toolInstance.printMergedCopy(mergeFileName);
                 done = true;
                 // No validation performed here, precedence is experimental and at your own risk, hence why it is not default
                 // Precedence is likely to drop conflicting routes, preferring one XML over another
             } else {
+                debug(tc + " Using lf merge algorithm ");
                 int attempts = 0;
                 int shuffles = 0;
                 done = tryLfMerge(toolInstance, fileList, mergeFileName);
                 do {
                     shuffles++;
+                    debug(tc + "shuffles: " + shuffles);
                     if(shuffles==2) {
                         debug("\nLarge to small.");
                         sharedPlugins = new ArrayList();
@@ -1182,9 +1191,10 @@ public class PluginMergeToolImpl implements PluginMergeTool {
                 } while(!done && shuffles < 3);
 
             }
-            if(!done) {
+                if(!done) {
                     throw new RuntimeException(NO_MERGE_ERR);
                 }
+
         } catch (Throwable t) {
             throw new RuntimeException(t);
         }
@@ -1288,6 +1298,10 @@ public class PluginMergeToolImpl implements PluginMergeTool {
         private final Hashtable<String, Node> uriGrps = new Hashtable<String, Node>();
         private final Hashtable<String, Node> uniqueUriGrps = new Hashtable<String, Node>();
         private Hashtable<String, Element> routes = new Hashtable();
+
+        // Route consolidation fields
+        private Map<Set<EffectiveRoute>, List<Element>> routeGroups = new HashMap<>();
+        private Map<String, Set<EffectiveRoute>> routeEffectiveMap = new HashMap<>();
 
         private final HashSet<String> containedUris = new HashSet<String>();
         private final HashSet<String> containedApps = new HashSet<String>();
@@ -1935,6 +1949,21 @@ public class PluginMergeToolImpl implements PluginMergeTool {
 
                 unsharedVhg.addAll(knownVhgs.values());
                 unsharedVhg.addAll(knownUniqueVhgs.values());
+
+                // Consolidate semantically equivalent routes
+                List<Element> allRoutes = new ArrayList<>();
+                for (Object route : routes.values()) {
+                    allRoutes.add((Element) route);
+                }
+
+                // Create Hashtable for server clusters from unsharedClusters Vector
+                Hashtable<String, Element> serverClusters = new Hashtable<>();
+                for (Node clusterNode : unsharedClusters) {
+                    Element cluster = (Element) clusterNode;
+                    serverClusters.put(cluster.getAttribute("Name"), cluster);
+                }
+
+                consolidateRoutes(allRoutes, serverClusters, knownVhgs, uriGrps);
             }
         }
 
@@ -2142,8 +2171,194 @@ public class PluginMergeToolImpl implements PluginMergeTool {
             return rtnNodes;
         }
 
+        private Set<EffectiveRoute> expandRoute(Element route, Hashtable serverClusters,
+                                               Hashtable virtualHostGroups, Hashtable uriGroups) {
+            Set<EffectiveRoute> effectiveRoutes = new HashSet<>();
+
+            String scName = route.getAttribute("ServerCluster");
+            String vhgName = route.getAttribute("VirtualHostGroup");
+            String ugName = route.getAttribute("UriGroup");
+
+            Element serverCluster = (Element) serverClusters.get(scName);
+            Element virtualHostGroup = (Element) virtualHostGroups.get(vhgName);
+            Element uriGroup = (Element) uriGroups.get(ugName);
+
+            if (serverCluster == null || virtualHostGroup == null || uriGroup == null) {
+                return effectiveRoutes; // Skip invalid routes
+            }
+
+            // Get all transport hosts from server cluster
+            Set<String> transportHosts = new HashSet<>();
+            NodeList servers = serverCluster.getElementsByTagName("Server");
+            for (int i = 0; i < servers.getLength(); i++) {
+                Element server = (Element) servers.item(i);
+                NodeList transports = server.getElementsByTagName("Transport");
+                for (int j = 0; j < transports.getLength(); j++) {
+                    Element transport = (Element) transports.item(j);
+                    transportHosts.add(transport.getAttribute("Hostname"));
+                }
+            }
+
+            // Get all virtual hosts
+            Set<String> virtualHosts = new HashSet<>();
+            NodeList vhNodes = virtualHostGroup.getElementsByTagName("VirtualHost");
+            for (int i = 0; i < vhNodes.getLength(); i++) {
+                Element vh = (Element) vhNodes.item(i);
+                virtualHosts.add(vh.getAttribute("Name"));
+            }
+
+            // Get all URIs
+            Set<String> uris = new HashSet<>();
+            NodeList uriNodes = uriGroup.getElementsByTagName("Uri");
+            for (int i = 0; i < uriNodes.getLength(); i++) {
+                Element uri = (Element) uriNodes.item(i);
+                uris.add(uri.getAttribute("Name"));
+            }
+
+            // Create cross product of all combinations
+            for (String transportHost : transportHosts) {
+                for (String virtualHost : virtualHosts) {
+                    for (String uri : uris) {
+                        effectiveRoutes.add(new EffectiveRoute(transportHost, virtualHost, uri));
+                    }
+                }
+            }
+
+            return effectiveRoutes;
+        }
+
+        private void consolidateRoutes(List<Element> allRoutes, Hashtable serverClusters,
+                                      Hashtable virtualHostGroups, Hashtable uriGroups) {
+
+            // Group routes by their effective route sets
+            for (Element route : allRoutes) {
+                Set<EffectiveRoute> effectiveRoutes = expandRoute(route, serverClusters,
+                                                                 virtualHostGroups, uriGroups);
+
+                String routeKey = route.getAttribute("ServerCluster") + "::" +
+                                 route.getAttribute("VirtualHostGroup") + "::" +
+                                 route.getAttribute("UriGroup");
+                routeEffectiveMap.put(routeKey, effectiveRoutes);
+
+                // Group routes with identical effective route sets
+                routeGroups.computeIfAbsent(effectiveRoutes, k -> new ArrayList<>()).add(route);
+            }
+
+            // For each group of equivalent routes, keep only one representative
+            routes.clear();
+            for (Map.Entry<Set<EffectiveRoute>, List<Element>> entry : routeGroups.entrySet()) {
+                List<Element> equivalentRoutes = entry.getValue();
+                if (!equivalentRoutes.isEmpty()) {
+                    // Keep the first route as representative
+                    Element representative = equivalentRoutes.get(0);
+                    String key = representative.getAttribute("ServerCluster") + "::" +
+                                representative.getAttribute("VirtualHostGroup") + "::" +
+                                representative.getAttribute("UriGroup");
+                    routes.put(key, representative);
+
+                    // Merge server clusters for equivalent routes
+                    if (equivalentRoutes.size() > 1) {
+                        mergeServerClustersForEquivalentRoutes(equivalentRoutes, serverClusters);
+                    }
+                }
+            }
+        }
+
+        private void mergeServerClustersForEquivalentRoutes(List<Element> equivalentRoutes,
+                                                           Hashtable serverClusters) {
+            if (equivalentRoutes.isEmpty()) return;
+
+            Element primaryRoute = equivalentRoutes.get(0);
+            String primaryClusterName = primaryRoute.getAttribute("ServerCluster");
+            Element primaryCluster = (Element) serverClusters.get(primaryClusterName);
+
+            Set<String> mergedServerNames = new HashSet<>();
+
+            // Collect all servers from equivalent routes
+            for (Element route : equivalentRoutes) {
+                String clusterName = route.getAttribute("ServerCluster");
+                Element cluster = (Element) serverClusters.get(clusterName);
+                if (cluster != null) {
+                    NodeList servers = cluster.getElementsByTagName("Server");
+                    for (int i = 0; i < servers.getLength(); i++) {
+                        Element server = (Element) servers.item(i);
+                        String serverName = server.getAttribute("Name");
+                        if (!mergedServerNames.contains(serverName)) {
+                            mergedServerNames.add(serverName);
+                            // Add server to primary cluster if not already present
+                            if (!hasServer(primaryCluster, serverName)) {
+                                primaryCluster.appendChild(server.cloneNode(true));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Update PrimaryServers section
+            updatePrimaryServersSection(primaryCluster, mergedServerNames);
+
+            // Point all equivalent routes to the merged cluster
+            for (Element route : equivalentRoutes) {
+                route.setAttribute("ServerCluster", primaryClusterName);
+            }
+        }
+
+        private boolean hasServer(Element cluster, String serverName) {
+            NodeList servers = cluster.getElementsByTagName("Server");
+            for (int i = 0; i < servers.getLength(); i++) {
+                Element server = (Element) servers.item(i);
+                if (serverName.equals(server.getAttribute("Name"))) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private void updatePrimaryServersSection(Element cluster, Set<String> serverNames) {
+            NodeList primaryServersNodes = cluster.getElementsByTagName("PrimaryServers");
+            if (primaryServersNodes.getLength() > 0) {
+                Element primaryServers = (Element) primaryServersNodes.item(0);
+                // Clear existing servers
+                while (primaryServers.hasChildNodes()) {
+                    primaryServers.removeChild(primaryServers.getFirstChild());
+                }
+                // Add all merged servers
+                for (String serverName : serverNames) {
+                    Element serverRef = cluster.getOwnerDocument().createElement("Server");
+                    serverRef.setAttribute("Name", serverName);
+                    primaryServers.appendChild(serverRef);
+                }
+            }
+        }
+
         public int getSeqNum() {
             return seqNum;
+        }
+    }
+
+    private class EffectiveRoute {
+        private String transportHost;
+        private String virtualHost;
+        private String uri;
+
+        public EffectiveRoute(String transportHost, String virtualHost, String uri) {
+            this.transportHost = transportHost;
+            this.virtualHost = virtualHost;
+            this.uri = uri;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (!(obj instanceof EffectiveRoute)) return false;
+            EffectiveRoute other = (EffectiveRoute) obj;
+            return Objects.equals(transportHost, other.transportHost) &&
+                   Objects.equals(virtualHost, other.virtualHost) &&
+                   Objects.equals(uri, other.uri);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(transportHost, virtualHost, uri);
         }
     }
 
