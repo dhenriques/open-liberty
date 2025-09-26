@@ -183,8 +183,13 @@ public class PluginMergeToolImpl implements PluginMergeTool {
      */
     private void printMergedCopy(String output) throws IOException, ParserConfigurationException, TransformerConfigurationException, TransformerException {
         tc = "printMergedCopy - ";
-        debug(tc + "Output File: " + output);
+        debug(tc + "ENTRY: Starting merge output generation");
+        debug(tc + "Output file: " + output);
+        debug(tc + "Shared plugins count: " + sharedPlugins.size());
+        debug(tc + "Input plugins count: " + (plugins != null ? plugins.length : 0));
+        debug(tc + "Cleaning plugins before output generation");
         cleanPlugins();
+        debug(tc + "Creating output file stream for: " + output);
         FileOutputStream fos = new FileOutputStream(output);
         DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
         DocumentBuilder parser = dbf.newDocumentBuilder();
@@ -197,6 +202,7 @@ public class PluginMergeToolImpl implements PluginMergeTool {
         mergeConfigNode = mergeDoc.getDocumentElement();
         removeComments(parser, mergeDoc);
 
+        debug(tc + "Adding Server Clusters section to merged document");
         mergeConfigNode.appendChild(mergeDoc.importNode(mergeDoc.createComment(" Server Clusters "), true));
 
         Node[] sc = null;
@@ -212,18 +218,24 @@ public class PluginMergeToolImpl implements PluginMergeTool {
                 mergeConfigNode.appendChild(mergeDoc.importNode(sc[i], true));
         }
 
+        debug(tc + "Processing unshared server clusters from " + plugins.length + " plugins");
         for (int i = 0; i < plugins.length; i++) {
             if (!plugins[i].getUniquePluginRep().isEmpty()) {
                 sc = plugins[i].getUnsharedServerClusters();
+                debug(tc + "Plugin " + i + " has " + sc.length + " unshared server clusters");
                 for (int j = 0; j < sc.length; j++)
                     mergeConfigNode.appendChild(mergeDoc.importNode(sc[j], true));
+            } else {
+                debug(tc + "Plugin " + i + " has no unique plugin representation - skipping");
             }
         }
 
+        debug(tc + "Adding Virtual Host Groups section to merged document");
         mergeConfigNode.appendChild(mergeDoc.createComment(" Virtual Host Groups "));
 
         //This Virtual host Group section was modified in order to avoid duplicate entries of the virtual host groups
         Set < String > addedVhostGroupNames = new HashSet < > ();
+        debug(tc + "Initialized VHost group tracking set to prevent duplicates");
         Node[] vhgs = null;
         itrSharedPlugins = sharedPlugins.iterator();
 
@@ -234,8 +246,11 @@ public class PluginMergeToolImpl implements PluginMergeTool {
                 Element vhgElem = (Element) vhgs[i];
                 String vhgName = vhgElem.getAttribute("Name");
                 if (!addedVhostGroupNames.contains(vhgName)) {
+                    debug(tc + "Adding shared VHost group: " + vhgName);
                     mergeConfigNode.appendChild(mergeDoc.importNode(vhgElem, true));
                     addedVhostGroupNames.add(vhgName);
+                } else {
+                    debug(tc + "Skipping duplicate shared VHost group: " + vhgName);
                 }
             }
         }
@@ -248,15 +263,20 @@ public class PluginMergeToolImpl implements PluginMergeTool {
                 Element vhgElem = (Element) vhgs[j];
                 String vhgName = vhgElem.getAttribute("Name");
                 if (!addedVhostGroupNames.contains(vhgName)) {
+                    debug(tc + "Adding unshared VHost group: " + vhgName + " from plugin " + i);
                     mergeConfigNode.appendChild(mergeDoc.importNode(vhgElem, true));
                     addedVhostGroupNames.add(vhgName);
+                } else {
+                    debug(tc + "Skipping duplicate unshared VHost group: " + vhgName + " from plugin " + i);
                 }
             }
         }
 
+        debug(tc + "Adding URI Groups section to merged document");
         mergeConfigNode.appendChild(mergeDoc.createComment(" URI Groups "));
 
         Node[] uriGrps = null;
+        debug(tc + "Processing shared URI groups");
         itrSharedPlugins = sharedPlugins.iterator();
         while (itrSharedPlugins.hasNext()) {
             uriGrps = (itrSharedPlugins.next()).getUriGrps();
@@ -264,20 +284,25 @@ public class PluginMergeToolImpl implements PluginMergeTool {
                 mergeConfigNode.appendChild(mergeDoc.importNode(uriGrps[i], true));
         }
 
+        debug(tc + "Processing plugin-specific URI groups");
         for (int i = 0; i < plugins.length; i++) {
             uriGrps = plugins[i].getUriGrps();
+            debug(tc + "Plugin " + i + " has " + uriGrps.length + " standard URI groups");
             for (int j = 0; j < uriGrps.length; j++)
                 mergeConfigNode.appendChild(mergeDoc.importNode(uriGrps[j], true));
 
             //output unqiueUriGrps needed due to vhost def
             uriGrps = plugins[i].getUniqueUriGrps();
+            debug(tc + "Plugin " + i + " has " + uriGrps.length + " unique URI groups");
             for (int j = 0; j < uriGrps.length; j++)
                 mergeConfigNode.appendChild(mergeDoc.importNode(uriGrps[j], true));
         }
 
+        debug(tc + "Adding Routes section to merged document");
         mergeConfigNode.appendChild(mergeDoc.createComment(" Routes "));
 
         Node[] routes = null;
+        debug(tc + "Processing shared routes");
         itrSharedPlugins = sharedPlugins.iterator();
         while (itrSharedPlugins.hasNext()) {
             routes = (itrSharedPlugins.next()).getRoutes();
@@ -285,8 +310,10 @@ public class PluginMergeToolImpl implements PluginMergeTool {
                 mergeConfigNode.appendChild(mergeDoc.importNode(routes[i], true));
         }
 
+        debug(tc + "Processing plugin-specific routes");
         for (int i = 0; i < plugins.length; i++) {
             routes = plugins[i].getRoutes();
+            debug(tc + "Plugin " + i + " has " + routes.length + " routes");
             for (int j = 0; j < routes.length; j++)
                 mergeConfigNode.appendChild(mergeDoc.importNode(routes[j], true));
         }
@@ -306,23 +333,41 @@ public class PluginMergeToolImpl implements PluginMergeTool {
 
         fos.flush();
         fos.close();
+        debug(tc + "File output stream closed successfully");
+        debug(tc + "EXIT: Merge output generation completed successfully");
 
         Tr.info(traceComponent, "Merged plugin config file written to " + output);
     }
 
     private void cleanPlugins() {
+        tc = "cleanPlugins - ";
+        debug(tc + "ENTRY: Starting plugin cleanup process");
+        debug(tc + "Shared plugins to clean: " + sharedPlugins.size());
+        debug(tc + "Input plugins to clean: " + (plugins != null ? plugins.length : 0));
+
+        long startTime = System.currentTimeMillis();
         sharedPlugins.trimToSize();
         Iterator<PluginInfo> itrSharedPlugins = sharedPlugins.iterator();
         try {
-            while (itrSharedPlugins.hasNext())
+            int sharedCount = 0;
+            while (itrSharedPlugins.hasNext()) {
                 ((itrSharedPlugins.next())).cleanPlugin();
+                sharedCount++;
+            }
+            debug(tc + "Cleaned " + sharedCount + " shared plugins");
 
-            for (int i = 0; i < plugins.length; i++)
+            for (int i = 0; i < plugins.length; i++) {
+                debug(tc + "Cleaning input plugin " + i);
                 plugins[i].cleanPlugin();
+            }
         } catch (ParserConfigurationException e) {
+            debug(tc + "ERROR: Parser configuration exception during cleanup: " + e.getMessage());
             Tr.info(traceComponent, NO_MERGE_ERR);
             throw new RuntimeException(e);
         }
+
+        long endTime = System.currentTimeMillis();
+        debug(tc + "EXIT: Plugin cleanup completed in " + (endTime - startTime) + "ms");
     }
 
     /*
@@ -334,7 +379,9 @@ public class PluginMergeToolImpl implements PluginMergeTool {
      */
     private boolean lfMerge() throws ParserConfigurationException {
         tc = "lfMerge - ";
-        debug(tc + "Merging plugins.");
+        debug(tc + "ENTRY: Starting plugin merge process");
+        debug(tc + "Total plugins to merge: " + plugins.length);
+        debug(tc + "Current shared plugins count: " + sharedPlugins.size());
         Iterator<PluginInfo> itrShared = null;
         // p2 - UniquePluginRep - always an input plugin-cfg.xml
         // p1 - UniquePluginRep - may be shared plugin or an input plugin found to the left of input plugin-cfg.xml held by p2
@@ -348,11 +395,14 @@ public class PluginMergeToolImpl implements PluginMergeTool {
         // inner loop will take care of matching the first input plugin-cfg.xml
         debug(tc + "Looping through all input files");
         for (int i = 1; i < plugins.length; i++) {
+            debug(tc + "Processing plugin " + i + " of " + (plugins.length - 1));
             p2 = plugins[i].getUniquePluginRep();
+            debug(tc + "Plugin " + i + " has " + p2.size() + " unique representations");
 
             sharedPlugins.trimToSize();
             PluginInfo sharedPlugin = null;
             itrShared = sharedPlugins.iterator();
+            debug(tc + "Checking against " + sharedPlugins.size() + " existing shared plugins");
             // if there is a shared plugin representation compare them to the selected input plugin (p2) first
             // this ensures uids that have already been noted as being shared between input plugins correctly end up in a shared group
             while (itrShared.hasNext()) {
@@ -367,18 +417,23 @@ public class PluginMergeToolImpl implements PluginMergeTool {
                     debug(tc + "UID: " + uid);
                     if (p2.containsKey(uid)) {
                         matched++;
-                        debug(tc + "Adding UID to shared: " + uid);
+                        debug(tc + "MATCH FOUND: UID '" + uid + "' exists in both shared and current plugin");
                         p2AppInfo = p2.get(uid);
+                        debug(tc + "Server cluster from current plugin: " + (p2AppInfo.getServerCluster() != null ? p2AppInfo.getServerCluster().getAttribute("Name") : "null"));
                         // add the servers from the input plugin-cfg.xml that correspond to the shared uid
                         // to the shared uid in the shared plugin representation
                         sharedPlugin.addSharedServers(plugins[i].getSeqNum(), p2AppInfo.getServerCluster(), (p1.get(uid)), true); /* 654526 */
                         // remove the uid from the input plugin-cfg.xml representation as it's now handles be a shared plugin representation
                         p2.remove(uid);
+                        debug(tc + "Moved UID '" + uid + "' to shared plugin, remaining UIDs in current: " + p2.size());
                     }
                 }
                 if((matched!=0) && (p1.size()!=matched)) {
-                    debug(tc + "Encountered an improperly scoped subset.");
+                    debug(tc + "ERROR: Encountered an improperly scoped subset - matched: " + matched + ", total: " + p1.size());
+                    debug(tc + "EXIT: Merge failed due to improper scoping");
                     return false;
+                } else if (matched > 0) {
+                    debug(tc + "Successfully matched " + matched + " UIDs with shared plugin");
                 }
             }
 
@@ -423,10 +478,13 @@ public class PluginMergeToolImpl implements PluginMergeTool {
             }
 
             // if a newShared plugin was created when comparing input plugin-cfg.xml files add it to the know sharedPlugins list
-            if (newSharedPlugin != null)
+            if (newSharedPlugin != null) {
                 sharedPlugins.add(newSharedPlugin);
-            debug(" ");
+                debug(tc + "Created new shared plugin with sequence number: " + newSharedPlugin.getSeqNum());
+            }
+            debug(tc + "Completed processing plugin " + i);
         }
+        debug(tc + "EXIT: Plugin merge completed successfully with " + sharedPlugins.size() + " shared plugins");
         return true;
     }
 
@@ -459,10 +517,13 @@ public class PluginMergeToolImpl implements PluginMergeTool {
             info = enumP2.nextElement();
             String uriName = info.getUri().getAttribute("Name");
             if (!pgi1.containedUris.contains(uriName)) {
+                debug(tc + "URI '" + uriName + "' not found in plugin, marking for unique VHost group");
                 info.uniqueVhgNeeded = true;
             } else if (matchUriAppVhost && !pgi1.containedApps.contains(info.getAppName())) {
+                debug(tc + "App '" + info.getAppName() + "' not found in plugin (URI/App/VHost matching), marking for unique VHost group");
                 info.uniqueVhgNeeded = true;
             } else {
+                debug(tc + "URI '" + uriName + "' found in plugin, can use shared VHost group");
                 info.uniqueVhgNeeded = false;
             }
         }
@@ -538,9 +599,8 @@ public class PluginMergeToolImpl implements PluginMergeTool {
 
     private void loadData(String[] files) throws SAXException, IOException, ParserConfigurationException {
         tc = "loadData - ";
-        //DOMParser parser = new DOMParser();
+        debug(tc + "ENTRY: Starting to load " + files.length + " plugin configuration files");
         String fileName = null;
-        debug(tc + "Loading files");
         plugins = new PluginInfo[files.length];
         for (int i = 0; i < files.length; i++) {
             debug(tc + "Processing file:  " + files[i]);
@@ -567,6 +627,7 @@ public class PluginMergeToolImpl implements PluginMergeTool {
             mergeConfigNode2 = (Element) dom.getDocumentElement().cloneNode(true); //PI07230
             NodeList nl = mergeConfigNode2.getElementsByTagName("IntelligentManagement"); //PI07230
             if (nl.getLength() != 0) {
+                debug(tc + "ERROR: Found " + nl.getLength() + " IntelligentManagement elements in file " + files[i]);
                 info("Configurations with IntelligentManagement can not be merged.");
                 throw new RuntimeException("Configurations with IntelligentManagement can not be merged.");
             }
@@ -700,26 +761,39 @@ public class PluginMergeToolImpl implements PluginMergeTool {
      * Confirm each route in each input file exists in merged
      */
     private boolean validateEach(String [] inputFiles, String mergeFileName) {
+        tc = "validateEach - ";
+        debug(tc + "ENTRY: Validating merged file against " + inputFiles.length + " input files");
         boolean passFail = true;
         File f = new File(mergeFileName);
         Hashtable<String, String> table = getRoutes(f);
+        debug(tc + "Merged file contains " + table.size() + " routes");
 
         for (int i = 0; i < inputFiles.length - 1; i++) {
+            debug(tc + "Validating input file " + (i + 1) + " of " + (inputFiles.length - 1) + ": " + inputFiles[i]);
             Hashtable<String, String> routes;
             f = new File(inputFiles[i]);
             routes = getRoutes(f);
+            debug(tc + "Input file contains " + routes.size() + " routes");
 
             Enumeration<String> e = routes.keys();
             while (e.hasMoreElements()) {
                 String s = e.nextElement();
                 if (!table.containsKey(s)) {
-                    debug("Merged file is missing the route: " + s + " from input file: " + inputFiles[i]);
+                    debug(tc + "VALIDATION FAILED: Route '" + s + "' from input file '" + inputFiles[i] + "' not found in merged file");
                     passFail = false;
                     break;
+                } else {
+                    debug(tc + "Route validated: " + s);
                 }
             }
-            if (!passFail) break;
+            if (!passFail) {
+                debug(tc + "Validation failed for file: " + inputFiles[i]);
+                break;
+            } else {
+                debug(tc + "All routes validated successfully for file: " + inputFiles[i]);
+            }
         }
+        debug(tc + "EXIT: Overall validation result: " + passFail);
         return passFail;
     }
 
@@ -735,11 +809,23 @@ public class PluginMergeToolImpl implements PluginMergeTool {
      * @throws TransformerException
      */
     private boolean tryLfMerge(PluginMergeToolImpl tool, String []inputs, String output) throws IOException, ParserConfigurationException, TransformerConfigurationException, TransformerException {
+        tc = "tryLfMerge - ";
+        debug(tc + "ENTRY: Attempting lightweight merge with " + inputs.length + " inputs");
+        long startTime = System.currentTimeMillis();
+
         boolean done = false;
         if (tool.lfMerge()) {
-           tool.printMergedCopy(output);
-           done = validateEach(inputs, output);
+            debug(tc + "Merge successful, generating output file");
+            tool.printMergedCopy(output);
+            debug(tc + "Validating merged result");
+            done = validateEach(inputs, output);
+            debug(tc + "Validation result: " + done);
+        } else {
+            debug(tc + "Merge failed during lfMerge phase");
         }
+
+        long endTime = System.currentTimeMillis();
+        debug(tc + "EXIT: Merge attempt completed in " + (endTime - startTime) + "ms, result: " + done);
         return done;
     }
 
@@ -749,9 +835,13 @@ public class PluginMergeToolImpl implements PluginMergeTool {
 
     @Override
     public void merge(String argv[]) {
+        tc = "merge - ";
+        debug(tc + "ENTRY: Starting merge operation with " + argv.length + " arguments");
 
-        if (argv.length < 2)
+        if (argv.length < 2) {
+            debug(tc + "ERROR: Insufficient arguments provided (" + argv.length + ")");
             throw new IllegalArgumentException("Please provide at least 1 plugin-cfg.xml file to merge.");
+        }
 
         PluginMergeToolImpl toolInstance = new PluginMergeToolImpl();
         sharedPlugins = new ArrayList<PluginInfo>(); // Needed in order to not add unnecessary server clusters
@@ -759,10 +849,13 @@ public class PluginMergeToolImpl implements PluginMergeTool {
         String mergeFileName = filesList.remove(filesList.size() - 1);
         String[] fileList = filesList.toArray(new String[filesList.size()]);
         try {
+            debug(tc + "Starting merge process with " + fileList.length + " files, output: " + mergeFileName);
             Tr.info(traceComponent, "Merging...");
+            debug(tc + "Sorting files from small to large");
             fileList = toolInstance.sortFiles(fileList,FILEINFO_SMALL_TO_LARGE_COMPARATOR);
             toolInstance.loadData(fileList);
         } catch (Throwable t) {
+            debug(tc + "ERROR: Unexpected error during data loading: " + t.getClass().getSimpleName() + ": " + t.getMessage());
             throw new RuntimeException(t);
         }
         try {
@@ -770,21 +863,24 @@ public class PluginMergeToolImpl implements PluginMergeTool {
                 toolInstance.pMerge();
                 toolInstance.printMergedCopy(mergeFileName);
             } else {
+                debug(tc + "Starting lightweight merge process");
                 int attempts = 0;
                 int shuffles = 0;
                 boolean done = tryLfMerge(toolInstance, fileList, mergeFileName);
+                debug(tc + "Initial merge attempt result: " + done);
                 do {
                     shuffles++;
                     if(shuffles==2) {
-                        debug("\nLarge to small.");
+                        debug(tc + "Retry #" + shuffles + ": Sorting files from large to small");
                         sharedPlugins = new ArrayList();
                         emptyServerClusters = new HashSet();
                         fileList = toolInstance.sortFiles(fileList,FILEINFO_LARGE_TO_SMALL_COMPARATOR);
                         toolInstance.loadData(fileList);
                         done = tryLfMerge(toolInstance, fileList, mergeFileName);
+                        debug(tc + "Large-to-small sort attempt result: " + done);
                         attempts = 1;
                     } else if(shuffles==3) {
-                        debug("\nRandom shuffle.");
+                        debug(tc + "Retry #" + shuffles + ": Random shuffle of files");
                         sharedPlugins = new ArrayList();
                         emptyServerClusters = new HashSet();
                         List<String> shuffle = new ArrayList<String>();
@@ -793,11 +889,12 @@ public class PluginMergeToolImpl implements PluginMergeTool {
                         fileList = (String[])Arrays.copyOf(shuffle.toArray(),shuffle.size(),String[].class);
                         toolInstance.loadData(fileList);
                         done = tryLfMerge(toolInstance, fileList, mergeFileName);
+                        debug(tc + "Random shuffle attempt result: " + done);
                         attempts = 1;
                     }
                     while (!done && attempts < toolInstance.getPluginsInfo().length) {
                         attempts++;
-                        debug("\nReorder and reprocess " + attempts);
+                        debug(tc + "Reorder attempt " + attempts + " of max " + toolInstance.getPluginsInfo().length);
                         sharedPlugins = new ArrayList();
                         emptyServerClusters = new HashSet();
                         List<String> reorder = new ArrayList<String>();
@@ -806,18 +903,24 @@ public class PluginMergeToolImpl implements PluginMergeTool {
                         fileList = (String[])Arrays.copyOf(reorder.toArray(),reorder.size(),String[].class);
                         toolInstance.loadData(fileList);
                         done = tryLfMerge(toolInstance, fileList, mergeFileName);
+                        debug(tc + "Reorder attempt " + attempts + " result: " + done);
                     }
                 } while(!done && shuffles < 3);
 
 
                 if(!done) {
+                    debug(tc + "ERROR: All merge attempts failed after " + shuffles + " shuffles and " + attempts + " reorder attempts");
                     throw new RuntimeException(NO_MERGE_ERR);
+                } else {
+                    debug(tc + "SUCCESS: Merge completed after " + shuffles + " shuffles and " + attempts + " attempts");
                 }
             }
         } catch (Throwable t) {
+            debug(tc + "ERROR: Unexpected error during merge process: " + t.getClass().getSimpleName() + ": " + t.getMessage());
             throw new RuntimeException(t);
         }
 
+        debug(tc + "EXIT: Merge operation completed successfully");
         Tr.info(traceComponent, "Merge Complete");
     }
 
@@ -1050,17 +1153,22 @@ public class PluginMergeToolImpl implements PluginMergeTool {
                 if (isXdOnly) {
                     try {
                         // appName - stripped from the uriGrp by removing the preceding /cell/<cellName>/application/ definition
-                        info.setAppName(uriGrpName.split("/cell/.+?(/application/)")[1]);
+                        String extractedAppName = uriGrpName.split("/cell/.+?(/application/)")[1];
+                        info.setAppName(extractedAppName);
+                        debug(tc + "Extracted app name '" + extractedAppName + "' from ODC URI group: " + uriGrpName);
                     } catch (ArrayIndexOutOfBoundsException e) {
+                        debug(tc + "Non-ODC URI group pattern detected: " + uriGrpName);
                         Tr.info(traceComponent, "Merging a non-ODC generated plugin-cfg.xml");
                         isXdOnly = false;
                         info.setAppName(uriGrpName);
 
                         if ((!setMatchUriAppVhost) && (matchUriAppVhost)) {
+                            debug(tc + "Disabling URI/App/VHost matching for non-ODC files");
                             PluginMergeToolImpl.matchUriAppVhost = false;
                             Tr.info(traceComponent, "Cannot match based on uri app vhost for non-ODC generated plugin-cfg.xml files. " +
                                                     "com.ibm.ws.pluginmerge.match.appname set to false");
                         } else {
+                            debug(tc + "Using setMatchUriAppVhost setting: " + setMatchUriAppVhost);
                             PluginMergeToolImpl.matchUriAppVhost = setMatchUriAppVhost;
                         }
                     }
@@ -1075,6 +1183,7 @@ public class PluginMergeToolImpl implements PluginMergeTool {
                 try {
                     info.setRoute((Element) ((Element) routes.get(uriGrpName)).cloneNode(true));
                 } catch (NullPointerException e) {
+                    debug(tc + "WARNING: UriGroup '" + uriGrpName + "' missing Route definition in file " + fileLoc + " - skipping");
                     Tr.info(traceComponent, "Skipping UriGroup " + uriGrpName + " because it does not have a corresponding Route definition");
                     continue;
                 }
@@ -1853,10 +1962,13 @@ public class PluginMergeToolImpl implements PluginMergeTool {
 
         @SuppressWarnings("unchecked")
         public boolean setSharedServer(String serverName, Node serverNode) {
-            if (sharedServers.put(serverName, serverNode.cloneNode(true)) == null)
-                return true;
-
-            return false;
+            boolean isNew = (sharedServers.put(serverName, serverNode.cloneNode(true)) == null);
+            if (isNew) {
+                debug("AppInfo.setSharedServer - Added new shared server: " + serverName + " (total: " + sharedServers.size() + ")");
+            } else {
+                debug("AppInfo.setSharedServer - Updated existing shared server: " + serverName);
+            }
+            return isNew;
         }
 
         @SuppressWarnings("unchecked")
