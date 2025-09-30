@@ -382,6 +382,16 @@ public class PluginMergeToolImpl implements PluginMergeTool {
         debug(tc + "ENTRY: Starting plugin merge process");
         debug(tc + "Total plugins to merge: " + plugins.length);
         debug(tc + "Current shared plugins count: " + sharedPlugins.size());
+
+        // Debug: Show all UIDs for all plugins at start
+        for (int idx = 0; idx < plugins.length; idx++) {
+            debug(tc + "=== ALL UIDs for plugin " + idx + " ===");
+            Hashtable<String, AppInfo> pluginRep = plugins[idx].getUniquePluginRep();
+            debug(tc + "Plugin " + idx + " has " + pluginRep.size() + " UIDs:");
+            for (String debugUid : pluginRep.keySet()) {
+                debug(tc + "  " + debugUid);
+            }
+        }
         Iterator<PluginInfo> itrShared = null;
         // p2 - UniquePluginRep - always an input plugin-cfg.xml
         // p1 - UniquePluginRep - may be shared plugin or an input plugin found to the left of input plugin-cfg.xml held by p2
@@ -394,10 +404,22 @@ public class PluginMergeToolImpl implements PluginMergeTool {
         // loop thru all input plugin-cfg.xml files starting at the second input plugin-cfg.xml
         // inner loop will take care of matching the first input plugin-cfg.xml
         debug(tc + "Looping through all input files");
+
+        // Show UIDs for plugin 0 first
+        debug(tc + "UIDs for plugin 0:");
+        Hashtable<String, AppInfo> p0 = plugins[0].getUniquePluginRep();
+        for (String pluginUid : p0.keySet()) {
+            debug(tc + "  " + pluginUid);
+        }
+
         for (int i = 1; i < plugins.length; i++) {
             debug(tc + "Processing plugin " + i + " of " + (plugins.length - 1));
             p2 = plugins[i].getUniquePluginRep();
             debug(tc + "Plugin " + i + " has " + p2.size() + " unique representations");
+            debug(tc + "UIDs for plugin " + i + ":");
+            for (String pluginUid : p2.keySet()) {
+                debug(tc + "  " + pluginUid);
+            }
 
             sharedPlugins.trimToSize();
             PluginInfo sharedPlugin = null;
@@ -1223,13 +1245,18 @@ public class PluginMergeToolImpl implements PluginMergeTool {
                         String vhName = eVh.nextElement();
                         info.setVh((Element) ((Element) vHosts.get(vhName)).cloneNode(true));
                         try {
-                            if (matchUriAppVhost)
-                                uniquePluginRep.put("/uri/" + uriName + "/app/" + info.getAppName() + "/vHost/" + vhName, info.clone());
-                            else if (sortVhostGrp) {
-                                uniquePluginRep.put("/uri/" + uriName + "/vhostGrp/" + vhgName.substring(0, vhgName.lastIndexOf("_" + seqNum)) + "/vHost/" + vhName, info.clone());
+                            String generatedUID;
+                            if (matchUriAppVhost) {
+                                generatedUID = "/uri/" + uriName + "/app/" + info.getAppName() + "/vHost/" + vhName;
+                                uniquePluginRep.put(generatedUID, info.clone());
+                            } else if (sortVhostGrp) {
+                                generatedUID = "/uri/" + uriName + "/vhostGrp/" + vhgName.substring(0, vhgName.lastIndexOf("_" + seqNum)) + "/vHost/" + vhName;
+                                uniquePluginRep.put(generatedUID, info.clone());
                             } else {
-                                uniquePluginRep.put("/uri/" + uriName + "/vHost/" + vhName, info.clone());
+                                generatedUID = "/uri/" + uriName + "/vHost/" + vhName;
+                                uniquePluginRep.put(generatedUID, info.clone());
                             }
+                            debug(tc + "Generated UID: '" + generatedUID + "' for plugin " + seqNum);
 
                         } catch (CloneNotSupportedException e) {
                             Tr.info(traceComponent, "Error processing /uri/" + uriName + "/app/" + info.getAppName() + "/vHost/\n" + e.getLocalizedMessage());
