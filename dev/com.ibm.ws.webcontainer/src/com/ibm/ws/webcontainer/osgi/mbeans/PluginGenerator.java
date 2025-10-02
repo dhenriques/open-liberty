@@ -1123,7 +1123,7 @@ public class PluginGenerator {
                         } else if (vh_alias.port == pcd.webServerHttpsPort) {
                             foundWebserverHttpsHostAlias = true;
                         } else {
-                            Tr.debug(tc, "Alias '{}' not added to plugin-cfg.xml; its port does not match either webserver ports {} and {}", alias, pcd.webServerHttpPort, pcd.webServerHttpsPort);
+                            Tr.debug(tc, String.format("Alias: %s not added to plugin-cfg.xml; its port does not match either webServerHttpPort: %s or webServerHttpsPort: %s", alias, pcd.webServerHttpPort, pcd.webServerHttpsPort));
                             continue; // Skip adding this virtual host alias
                         }
                         Tr.debug(tc, "adding " + vh.getName() + " -> " + alias);
