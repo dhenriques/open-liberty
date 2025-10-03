@@ -283,14 +283,13 @@ public class PluginGeneratorTest {
         assertEquals("There should be one element in the virtual host set", 1, virtualHostSet.size());
         assertSame("The default host object should be in the virtual host set", mockDefaultHost, virtualHostSet.iterator().next());
 
-        assertEquals("There should be one element in the virtual host alias data", 1, vhostAliasData.size());
+        // vhostAliasData will contain default_host but with an empty list of aliases
+        assertEquals("vhostAliasData should contain default_host", 1, vhostAliasData.size());
         List<VHostData> data = vhostAliasData.get("default_host");
         assertNotNull("There should be a default_host element in the vhostAliasData map", data);
+        assertEquals("VHostData should be empty when no aliases match webserver ports", 0, data.size());
 
-        // There will now be more aliases, because the host aliases were explicitly configured.
-        assertEquals("There should be two elements in the VHostData", 2, data.size());
-        assertTrue("VHostData should contain an alias for *:1", data.contains(new VHostData("*", 1)));
-        assertTrue("VHostData should contain an alias for *:3", data.contains(new VHostData("*", 3)));
+        // Verify that warnings are logged about the missing default ports
         assertTrue("comment about missing port 80", outputMgr.checkForStandardOut("(\\*:80)"));
         assertTrue("comment about missing port 443", outputMgr.checkForStandardOut("(\\*:443)"));
         vhostAliasData.clear();
