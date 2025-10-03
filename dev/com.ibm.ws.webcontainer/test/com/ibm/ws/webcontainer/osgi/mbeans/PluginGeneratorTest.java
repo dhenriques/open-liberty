@@ -17,6 +17,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -172,7 +173,10 @@ public class PluginGeneratorTest {
                 will(returnValue(mockBundle));
 
                 allowing(mockBundle).getDataFile("cached-PluginCfg.xml");
-                will(returnValue(new File("")));
+                will(returnValue(new File(testClassesDir + "/cached-PluginCfg.xml")));
+
+                allowing(mockBundle).getState();
+                will(returnValue(Bundle.ACTIVE));
 
                 allowing(element).getOwnerDocument();
                 will(returnValue(doc));
@@ -999,5 +1003,438 @@ public class PluginGeneratorTest {
         }
         // rename generated file to leave a clean space for the next test, but keep the file for debug
         testfile.renameTo(new File(testClassesDir + "/serverRole-plugin-cfg.xml"));
+    }
+
+    @Test
+    public void testWebserverPortsWithHostAliases() throws Exception {
+        final WsResource mockTempWsResource = context.mock(WsResource.class, "tempResource");
+        final WsResource mockFinalWsResource = context.mock(WsResource.class, "finalResource");
+
+        setCommonExpectations();
+
+        // set expectations specific for this test
+        context.checking(new Expectations() {
+            {
+                allowing(mockLocationAdmin).getServerName();
+                will(returnValue("SystemProvidedServerName"));
+
+                allowing(mockBundleContext).getAllServiceReferences(null, "(&(service.factoryPid=com.ibm.ws.http.virtualhost)(|(enabled=true)(id=default_host)))");
+                will(returnValue(new ServiceReference<?>[] { mockDefVhostRef }));
+
+                allowing(mockDefVhostRef).getProperty("id");
+                will(returnValue("default_host"));
+                allowing(mockDefVhostRef).getProperty("hostAlias");
+                will(returnValue(Arrays.asList("*:80", "*:443", "*:49080", "*:49443")));
+                allowing(mockDefVhostRef).getProperty("allowFromEndpointRef");
+                will(returnValue(null));
+
+                // No applications deployed - vhostMgr returns empty
+                allowing(mockVhostMgr).getVirtualHosts();
+                will(returnIterator());
+
+                allowing(mockBundleContext).getAllServiceReferences(null, "(&(enabled=true)(|(httpPort>=1)(httpsPort>=1))(service.pid=Endpoint1))");
+                will(returnValue(new ServiceReference<?>[] { mockEndpointInfoRef }));
+                allowing(mockEndpointInfoRef).getProperty("id");
+                will(returnValue("Endpoint1"));
+
+                allowing(mockEndpointInfo).getEndpointId();
+                will(returnValue(mockEndpointInfo.toString()));
+                one(mockEndpointInfoRef).getProperty("_defaultHostName");
+                will(returnValue("localhost"));
+                one(mockEndpointInfoRef).getProperty("host");
+                will(returnValue("*"));
+                one(mockEndpointInfoRef).getProperty("httpPort");
+                will(returnValue(1));
+                one(mockEndpointInfoRef).getProperty("httpsPort");
+                will(returnValue(-1));
+
+                allowing(mockSessionManager).getCloneSeparator();
+                will(returnValue(':'));
+                allowing(mockSessionManager).getCloneID();
+                will(returnValue("ServerCloneID"));
+                allowing(mockDefaultHost);
+                allowing(mockSessionManager);
+
+                allowing(element).getOwnerDocument();
+                will(returnValue(doc));
+
+                allowing(mockLocationAdmin).getServerOutputResource("plugin-cfg.xml");
+                will(returnValue(mockFinalWsResource));
+                allowing(mockLocationAdmin).getServerOutputResource(".plugin-cfg.xml");
+                will(returnValue(mockTempWsResource));
+                allowing(mockTempWsResource).putStream();
+                will(returnValue(new FileOutputStream(new File(testClassesDir + "/.plugin-cfg.xml"))));
+                allowing(mockTempWsResource).asFile();
+                will(returnValue((new File(testClassesDir + "/.plugin-cfg.xml"))));
+                allowing(mockTempWsResource).exists();
+                will(returnValue(true));
+                allowing(mockFinalWsResource).putStream();
+                will(returnValue(new FileOutputStream(new File(testClassesDir + "/plugin-cfg.xml"))));
+                allowing(mockFinalWsResource).asFile();
+                will(returnValue((new File(testClassesDir + "/plugin-cfg.xml"))));
+                allowing(mockFinalWsResource).exists();
+                will(returnValue(true));
+            }
+        });
+
+        Map<String, Object> config = new HashMap<String, Object>();
+        setDefaultConfig(config);
+        // set config values for this test
+        // Define webserver http and https ports in plugin configuration
+        config.put("webserverPort", "49080");
+        config.put("webserverSecurePort", "49443");
+
+        PluginGenerator pluginGen = new PluginGenerator(config, mockLocationAdmin, mockBundleContext);
+        pluginGen.generateXML("userSpecifiedWebserverLocation", "userSpecifiedServerName", mockWebContainer, mockSessionManager, mockVhostMgr, mockLocationAdmin, false, null);
+
+        // check that the config file was created
+        File testfile = new File(testClassesDir + "/plugin-cfg.xml");
+        assertTrue(testfile.exists());
+
+        // Write the equivalent server.xml for reference
+        writeServerXML(testClassesDir + "/webserverPortsWithHostAliases-server.xml",
+            "Endpoint1", "*", "50080", "50443",
+            new String[]{"default_host", "*:50080", "*:50443", "*:49080", "*:49443"},
+            "49080", "49443");
+
+        // and that it contains the webserver ports
+        DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+        Document dom = null;
+        try {
+            //Using factory get an instance of document builder
+            DocumentBuilder db = dbf.newDocumentBuilder();
+            //parse using builder to get DOM representation of the XML file
+            dom = db.parse(testfile);
+        } catch (ParserConfigurationException pce) {
+            pce.printStackTrace();
+            fail("Failed to configure XML parser: " + pce.getMessage());
+        } catch (SAXException se) {
+            se.printStackTrace();
+            fail("Failed to parse plugin-cfg.xml (file may be empty or invalid): " + se.getMessage());
+        } catch (IOException ioe) {
+            ioe.printStackTrace();
+            fail("Failed to read plugin-cfg.xml: " + ioe.getMessage());
+        }
+
+        assertNotNull("Document should not be null after parsing", dom);
+        Element docEle = dom.getDocumentElement();
+        assertNotNull("Document root element should not be null", docEle);
+
+        // Verify the VirtualHostGroup contains the correct ports
+        NodeList vhGroups = docEle.getElementsByTagName("VirtualHostGroup");
+        assertTrue("Should have at least one VirtualHostGroup", vhGroups.getLength() > 0);
+
+        // Check for VirtualHost entries with the configured ports
+        boolean foundHttp = false;
+        boolean foundHttps = false;
+
+        for (int i = 0; i < vhGroups.getLength(); i++) {
+            Element vhGroup = (Element) vhGroups.item(i);
+            NodeList vhosts = vhGroup.getElementsByTagName("VirtualHost");
+
+            for (int j = 0; j < vhosts.getLength(); j++) {
+                Element vhost = (Element) vhosts.item(j);
+                String name = vhost.getAttribute("Name");
+
+                if (name.contains(":49080")) {
+                    foundHttp = true;
+                }
+                if (name.contains(":49443")) {
+                    foundHttps = true;
+                }
+            }
+        }
+
+        assertTrue("Should find VirtualHost entry for HTTP port 49080", foundHttp);
+        assertTrue("Should find VirtualHost entry for HTTPS port 49443", foundHttps);
+        // rename generated file to leave a clean space for the next test, but keep the file for debug
+        testfile.renameTo(new File(testClassesDir + "/webserverPortsWithHostAliases-plugin-cfg.xml"));
+    }
+
+    @Test
+    public void testWebserverPortsWithCustomVirtualHost() throws Exception {
+        final DynamicVirtualHost mockCustomHost = context.mock(DynamicVirtualHost.class, "custom_host");
+        final ServiceReference<?> mockCustomVhostRef = context.mock(ServiceReference.class, "custom_hostRef");
+        final WsResource mockTempWsResource2 = context.mock(WsResource.class, "tempResource2");
+        final WsResource mockFinalWsResource2 = context.mock(WsResource.class, "finalResource2");
+
+        setCommonExpectations();
+
+        context.checking(new Expectations() {
+            {
+                allowing(mockLocationAdmin).getServerName();
+                will(returnValue("SystemProvidedServerName"));
+
+                // Return both default_host and custom_host
+                allowing(mockBundleContext).getAllServiceReferences(null, "(&(service.factoryPid=com.ibm.ws.http.virtualhost)(|(enabled=true)(id=default_host)))");
+                will(returnValue(new ServiceReference<?>[] { mockDefVhostRef, mockCustomVhostRef }));
+
+                // default_host configuration with different ports (not matching webserver ports)
+                allowing(mockDefVhostRef).getProperty("id");
+                will(returnValue("default_host"));
+                allowing(mockDefVhostRef).getProperty("hostAlias");
+                will(returnValue(Arrays.asList("*:48080", "*:48443")));
+                allowing(mockDefVhostRef).getProperty("allowFromEndpointRef");
+                will(returnValue(null));
+
+                // custom_host configuration with webserver ports
+                allowing(mockCustomVhostRef).getProperty("id");
+                will(returnValue("custom_host"));
+                allowing(mockCustomVhostRef).getProperty("hostAlias");
+                will(returnValue(Arrays.asList("*:49080", "*:49443")));
+                allowing(mockCustomVhostRef).getProperty("allowFromEndpointRef");
+                will(returnValue(null));
+
+                allowing(mockVhostMgr).getVirtualHosts();
+                will(returnIterator(mockDefaultHost, mockCustomHost));
+
+                allowing(mockDefaultHost).getName();
+                will(returnValue("default_host"));
+                allowing(mockDefaultHost).getAliases();
+                will(returnValue(Arrays.asList("*:48080", "*:48443")));
+
+                allowing(mockCustomHost).getName();
+                will(returnValue("custom_host"));
+                allowing(mockCustomHost).getAliases();
+                will(returnValue(Arrays.asList("*:49080", "*:49443")));
+
+                allowing(mockBundleContext).getAllServiceReferences(null, "(&(enabled=true)(|(httpPort>=1)(httpsPort>=1))(service.pid=Endpoint1))");
+                will(returnValue(new ServiceReference<?>[] { mockEndpointInfoRef }));
+                allowing(mockEndpointInfoRef).getProperty("id");
+                will(returnValue("Endpoint1"));
+
+                allowing(mockEndpointInfo).getEndpointId();
+                will(returnValue(mockEndpointInfo.toString()));
+                one(mockEndpointInfoRef).getProperty("_defaultHostName");
+                will(returnValue("localhost"));
+                one(mockEndpointInfoRef).getProperty("host");
+                will(returnValue("*"));
+                one(mockEndpointInfoRef).getProperty("httpPort");
+                will(returnValue(1));
+                one(mockEndpointInfoRef).getProperty("httpsPort");
+                will(returnValue(-1));
+
+                allowing(mockSessionManager).getCloneSeparator();
+                will(returnValue(':'));
+                allowing(mockSessionManager).getCloneID();
+                will(returnValue("ServerCloneID"));
+                allowing(mockDefaultHost);
+                allowing(mockCustomHost);
+                allowing(mockSessionManager);
+
+                allowing(element).getOwnerDocument();
+                will(returnValue(doc));
+
+                allowing(mockLocationAdmin).getServerOutputResource("plugin-cfg.xml");
+                will(returnValue(mockFinalWsResource2));
+                allowing(mockLocationAdmin).getServerOutputResource(".plugin-cfg.xml");
+                will(returnValue(mockTempWsResource2));
+                allowing(mockTempWsResource2).putStream();
+                will(returnValue(new FileOutputStream(new File(testClassesDir + "/.plugin-cfg.xml"))));
+                allowing(mockTempWsResource2).asFile();
+                will(returnValue((new File(testClassesDir + "/.plugin-cfg.xml"))));
+                allowing(mockTempWsResource2).exists();
+                will(returnValue(true));
+                allowing(mockFinalWsResource2).putStream();
+                will(returnValue(new FileOutputStream(new File(testClassesDir + "/plugin-cfg.xml"))));
+                allowing(mockFinalWsResource2).asFile();
+                will(returnValue((new File(testClassesDir + "/plugin-cfg.xml"))));
+                allowing(mockFinalWsResource2).exists();
+                will(returnValue(true));
+            }
+        });
+
+        Map<String, Object> config = new HashMap<String, Object>();
+        setDefaultConfig(config);
+        // set config values for this test
+        // Define webserver http and https ports in plugin configuration
+        config.put("webserverPort", "49080");
+        config.put("webserverSecurePort", "49443");
+
+        PluginGenerator pluginGen = new PluginGenerator(config, mockLocationAdmin, mockBundleContext);
+        pluginGen.generateXML("userSpecifiedWebserverLocation", "userSpecifiedServerName", mockWebContainer, mockSessionManager, mockVhostMgr, mockLocationAdmin, false, null);
+
+        // check that the config file was created
+        File testfile = new File(testClassesDir + "/plugin-cfg.xml");
+        assertTrue(testfile.exists());
+
+        // Write the equivalent server.xml for reference
+        writeServerXMLWithMultipleHosts(testClassesDir + "/webserverPortsWithCustomVirtualHost-server.xml",
+            "Endpoint1", "*", "50080", "50443",
+            new String[]{"default_host", "*:48080", "*:48443"},
+            new String[]{"custom_host", "*:49080", "*:49443"},
+            "49080", "49443");
+
+        // and that it contains the webserver ports
+        DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+        Document dom = null;
+        try {
+            //Using factory get an instance of document builder
+            DocumentBuilder db = dbf.newDocumentBuilder();
+            //parse using builder to get DOM representation of the XML file
+            dom = db.parse(testfile);
+        } catch (ParserConfigurationException pce) {
+            pce.printStackTrace();
+            fail("Failed to configure XML parser: " + pce.getMessage());
+        } catch (SAXException se) {
+            se.printStackTrace();
+            fail("Failed to parse plugin-cfg.xml (file may be empty or invalid): " + se.getMessage());
+        } catch (IOException ioe) {
+            ioe.printStackTrace();
+            fail("Failed to read plugin-cfg.xml: " + ioe.getMessage());
+        }
+
+        assertNotNull("Document should not be null after parsing", dom);
+        Element docEle = dom.getDocumentElement();
+        assertNotNull("Document root element should not be null", docEle);
+
+        // Verify the VirtualHostGroup contains the correct ports
+        NodeList vhGroups = docEle.getElementsByTagName("VirtualHostGroup");
+        assertTrue("Should have at least one VirtualHostGroup", vhGroups.getLength() >= 1);
+
+        // Check for VirtualHost entries with the configured ports
+        // All matching aliases should be grouped into default_host
+        boolean foundHttp = false;
+        boolean foundHttps = false;
+
+        for (int i = 0; i < vhGroups.getLength(); i++) {
+            Element vhGroup = (Element) vhGroups.item(i);
+            String vhGroupName = vhGroup.getAttribute("Name");
+            NodeList vhosts = vhGroup.getElementsByTagName("VirtualHost");
+
+            for (int j = 0; j < vhosts.getLength(); j++) {
+                Element vhost = (Element) vhosts.item(j);
+                String name = vhost.getAttribute("Name");
+
+                // All matching aliases should be in default_host
+                if (vhGroupName.equals("default_host")) {
+                    if (name.contains(":49080")) {
+                        foundHttp = true;
+                    }
+                    if (name.contains(":49443")) {
+                        foundHttps = true;
+                    }
+                }
+            }
+        }
+
+        assertTrue("Should find VirtualHost entry for HTTP port 49080 in default_host", foundHttp);
+        assertTrue("Should find VirtualHost entry for HTTPS port 49443 in default_host", foundHttps);
+        // rename generated file to leave a clean space for the next test, but keep the file for debug
+        testfile.renameTo(new File(testClassesDir + "/webserverPortsWithCustomVirtualHost-plugin-cfg.xml"));
+    }
+
+    // Helper method to write server.xml for single virtual host tests
+    private void writeServerXML(String filename, String endpointId, String host, String httpPort, String httpsPort,
+                                String[] vhostConfig, String webserverPort, String webserverSecurePort) {
+        try {
+            java.io.FileWriter fw = new java.io.FileWriter(filename);
+            fw.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+            fw.write("<server description=\"Test Server Configuration\">\n\n");
+            fw.write("    <!-- Feature Manager -->\n");
+            fw.write("    <featureManager>\n");
+            fw.write("        <feature>servlet-3.1</feature>\n");
+            fw.write("        <feature>webserverPluginUtility-1.0</feature>\n");
+            fw.write("        <feature>localConnector-1.0</feature>\n");
+            fw.write("    </featureManager>\n\n");
+            fw.write("    <!-- HTTP Endpoint configuration -->\n");
+            fw.write("    <httpEndpoint id=\"" + endpointId + "\"\n");
+            fw.write("                  host=\"" + host + "\"\n");
+            fw.write("                  httpPort=\"" + httpPort + "\"\n");
+            fw.write("                  httpsPort=\"" + httpsPort + "\" />\n\n");
+            fw.write("    <!-- Virtual Host configuration -->\n");
+            fw.write("    <virtualHost id=\"" + vhostConfig[0] + "\">\n");
+            for (int i = 1; i < vhostConfig.length; i++) {
+                fw.write("        <hostAlias>" + vhostConfig[i] + "</hostAlias>\n");
+            }
+            fw.write("    </virtualHost>\n\n");
+            fw.write("    <!-- Plugin Configuration -->\n");
+            fw.write("    <pluginConfiguration\n");
+            fw.write("        webserverName=\"webserver1\"\n");
+            fw.write("        webserverPort=\"" + webserverPort + "\"\n");
+            fw.write("        webserverSecurePort=\"" + webserverSecurePort + "\"\n");
+            fw.write("        pluginInstallRoot=\"/opt/IBM/WebSphere/Plugins\"\n");
+            fw.write("        httpEndpointRef=\"" + endpointId + "\"\n");
+            fw.write("        sslKeyringLocation=\"keyringString\"\n");
+            fw.write("        sslStashfileLocation=\"stashfileString\"\n");
+            fw.write("        serverIOTimeout=\"900\"\n");
+            fw.write("        connectTimeout=\"5\"\n");
+            fw.write("        extendedHandshake=\"false\"\n");
+            fw.write("        waitForContinue=\"false\"\n");
+            fw.write("        logDirLocation=\"/opt/IBM/WebSphere/Plugins/logs/webserver1\"\n");
+            fw.write("        serverIOTimeoutRetry=\"-1\"\n");
+            fw.write("        loadBalanceWeight=\"20\"\n");
+            fw.write("        serverRole=\"PRIMARY\"\n");
+            fw.write("        ipv6Preferred=\"false\" />\n\n");
+            fw.write("    <!-- Test Application to activate virtual hosts -->\n");
+            fw.write("    <webApplication id=\"testApp\" location=\"test.war\" contextRoot=\"/\">\n");
+            fw.write("        <classloader delegation=\"parentLast\"/>\n");
+            fw.write("    </webApplication>\n\n");
+            fw.write("</server>\n");
+            fw.close();
+            System.out.println("Wrote server.xml to: " + filename);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    // Helper method to write server.xml for multiple virtual host tests
+    private void writeServerXMLWithMultipleHosts(String filename, String endpointId, String host, String httpPort, String httpsPort,
+                                                  String[] vhost1Config, String[] vhost2Config,
+                                                  String webserverPort, String webserverSecurePort) {
+        try {
+            java.io.FileWriter fw = new java.io.FileWriter(filename);
+            fw.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+            fw.write("<server description=\"Test Server Configuration\">\n\n");
+            fw.write("    <!-- Feature Manager -->\n");
+            fw.write("    <featureManager>\n");
+            fw.write("        <feature>servlet-3.1</feature>\n");
+            fw.write("        <feature>webserverPluginUtility-1.0</feature>\n");
+            fw.write("        <feature>localConnector-1.0</feature>\n");
+            fw.write("    </featureManager>\n\n");
+            fw.write("    <!-- HTTP Endpoint configuration -->\n");
+            fw.write("    <httpEndpoint id=\"" + endpointId + "\"\n");
+            fw.write("                  host=\"" + host + "\"\n");
+            fw.write("                  httpPort=\"" + httpPort + "\"\n");
+            fw.write("                  httpsPort=\"" + httpsPort + "\" />\n\n");
+            fw.write("    <!-- Virtual Host configurations -->\n");
+            fw.write("    <virtualHost id=\"" + vhost1Config[0] + "\">\n");
+            for (int i = 1; i < vhost1Config.length; i++) {
+                fw.write("        <hostAlias>" + vhost1Config[i] + "</hostAlias>\n");
+            }
+            fw.write("    </virtualHost>\n\n");
+            fw.write("    <virtualHost id=\"" + vhost2Config[0] + "\">\n");
+            for (int i = 1; i < vhost2Config.length; i++) {
+                fw.write("        <hostAlias>" + vhost2Config[i] + "</hostAlias>\n");
+            }
+            fw.write("    </virtualHost>\n\n");
+            fw.write("    <!-- Plugin Configuration -->\n");
+            fw.write("    <pluginConfiguration\n");
+            fw.write("        webserverName=\"webserver1\"\n");
+            fw.write("        webserverPort=\"" + webserverPort + "\"\n");
+            fw.write("        webserverSecurePort=\"" + webserverSecurePort + "\"\n");
+            fw.write("        pluginInstallRoot=\"/opt/IBM/WebSphere/Plugins\"\n");
+            fw.write("        httpEndpointRef=\"" + endpointId + "\"\n");
+            fw.write("        sslKeyringLocation=\"keyringString\"\n");
+            fw.write("        sslStashfileLocation=\"stashfileString\"\n");
+            fw.write("        serverIOTimeout=\"900\"\n");
+            fw.write("        connectTimeout=\"5\"\n");
+            fw.write("        extendedHandshake=\"false\"\n");
+            fw.write("        waitForContinue=\"false\"\n");
+            fw.write("        logDirLocation=\"/opt/IBM/WebSphere/Plugins/logs/webserver1\"\n");
+            fw.write("        serverIOTimeoutRetry=\"-1\"\n");
+            fw.write("        loadBalanceWeight=\"20\"\n");
+            fw.write("        serverRole=\"PRIMARY\"\n");
+            fw.write("        ipv6Preferred=\"false\" />\n\n");
+            fw.write("    <!-- Test Application to activate virtual hosts -->\n");
+            fw.write("    <webApplication id=\"testApp\" location=\"test.war\" contextRoot=\"/\">\n");
+            fw.write("        <classloader delegation=\"parentLast\"/>\n");
+            fw.write("    </webApplication>\n\n");
+            fw.write("</server>\n");
+            fw.close();
+            System.out.println("Wrote server.xml to: " + filename);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 }
