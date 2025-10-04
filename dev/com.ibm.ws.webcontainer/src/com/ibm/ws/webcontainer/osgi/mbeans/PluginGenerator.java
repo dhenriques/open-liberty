@@ -354,11 +354,12 @@ public class PluginGenerator {
                 vhElem.setAttribute("Name", vh.getName());
                 rootElement.appendChild(vhElem);
 
-                if (!vhostAliasData.containsKey(vh.getName())) {
+                List<VHostData> aliases = vhostAliasData.get(vh.getName());
+                if (aliases == null) {
                     continue;
                 }
                 // Create a VirtualHost element for each alias
-                for (VHostData vh_aliasData : vhostAliasData.get(vh.getName())) {
+                for (VHostData vh_aliasData : aliases) {
                     Element aliasElem = output.createElement("VirtualHost");
                     // The IPv6 is already has the [] in alias
                     aliasElem.setAttribute("Name", vh_aliasData.host + ":" + vh_aliasData.port);
