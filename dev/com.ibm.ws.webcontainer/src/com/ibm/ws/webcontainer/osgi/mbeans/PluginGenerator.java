@@ -1135,6 +1135,9 @@ public class PluginGenerator {
                 } else {
                     List<VHostData> vh_aliasData = new ArrayList<VHostData>();
 
+                    // Filter virtual host aliases to only include those matching the configured webserver ports.
+                    // This ensures that only traffic destined for the webserver ports is routed to the application server.
+                    // Any aliases on other ports are excluded from the plugin configuration.
                     for (String alias : vh_aliases) {
                         if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                             Tr.debug(tc, "iterating on virtual host " + vh.getName());
@@ -1142,13 +1145,15 @@ public class PluginGenerator {
 
                         VHostData vh_alias = new VHostData(alias);
 
+                        // Only include this alias if its port matches one of the configured webserver ports
                         if (vh_alias.port == pcd.webServerHttpPort) {
                             foundWebserverHttpHostAlias = true;
                         } else if (vh_alias.port == pcd.webServerHttpsPort) {
                             foundWebserverHttpsHostAlias = true;
                         } else {
+                            // Port doesn't match - skip this alias
                             Tr.debug(tc, String.format("Alias: %s not added to plugin-cfg.xml; its port does not match either webServerHttpPort: %s or webServerHttpsPort: %s", alias, pcd.webServerHttpPort, pcd.webServerHttpsPort));
-                            continue; // Skip adding this virtual host alias
+                            continue;
                         }
                         Tr.debug(tc, "adding " + vh.getName() + " -> " + alias);
                         vh_aliasData.add(vh_alias);
