@@ -721,21 +721,22 @@ public class PluginGenerator {
             // Routes point to the original VirtualHostGroup name (preserving virtual host structure)
             for (DynamicVirtualHost vhost : virtualHostSet) {
                 for (ClusterUriGroup cug : cUgsSet) {
-                    if (vhost.getName().equals(cug.vhostName)) {
-                        // Check if this virtual host has any matching aliases in vhostAliasData
-                        List<VHostData> aliasData = vhostAliasData.get(vhost.getName());
-                        boolean hasMatchingAliases = (aliasData != null && !aliasData.isEmpty());
-
-                        if (hasMatchingAliases) {
-                            // This vhost has matching aliases, so create a route pointing to the original vhost name
-                            Element routeElem = output.createElement("Route");
-                            routeElem.setAttribute("VirtualHostGroup", vhost.getName());
-                            routeElem.setAttribute("UriGroup", cug.uriGroupName);
-                            routeElem.setAttribute("ServerCluster", cug.clusterName);
-                            rootElement.appendChild(routeElem);
-                        }
-                        // If no matching aliases, skip creating the route
+                    if (!vhost.getName().equals(cug.vhostName)) {
+                        continue; // Not this vhost
                     }
+
+                    // Check if this virtual host has any matching aliases in vhostAliasData
+                    List<VHostData> aliasData = vhostAliasData.get(vhost.getName());
+                    if (aliasData == null || aliasData.isEmpty()) {
+                        continue; // No matching aliases, skip creating the route
+                    }
+
+                    // This vhost has matching aliases, so create a route pointing to the original vhost name
+                    Element routeElem = output.createElement("Route");
+                    routeElem.setAttribute("VirtualHostGroup", vhost.getName());
+                    routeElem.setAttribute("UriGroup", cug.uriGroupName);
+                    routeElem.setAttribute("ServerCluster", cug.clusterName);
+                    rootElement.appendChild(routeElem);
                 }
             }
 
