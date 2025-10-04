@@ -64,6 +64,8 @@ import com.ibm.ws.webcontainer.osgi.WebContainer;
 import com.ibm.ws.webcontainer.osgi.mbeans.PluginGenerator.HttpEndpointInfo;
 import com.ibm.ws.webcontainer.osgi.mbeans.PluginGenerator.ServerData;
 import com.ibm.ws.webcontainer.osgi.mbeans.PluginGenerator.VHostData;
+import com.ibm.ws.webcontainer.osgi.webapp.WebApp;
+import com.ibm.ws.webcontainer.webapp.WebAppConfiguration;
 import com.ibm.wsspi.kernel.service.location.WsLocationAdmin;
 import com.ibm.wsspi.kernel.service.location.WsResource;
 
@@ -1009,6 +1011,8 @@ public class PluginGeneratorTest {
     public void testWebserverPortsWithHostAliases() throws Exception {
         final WsResource mockTempWsResource = context.mock(WsResource.class, "tempResource");
         final WsResource mockFinalWsResource = context.mock(WsResource.class, "finalResource");
+        final WebApp mockWebApp = context.mock(WebApp.class, "testApp");
+        final WebAppConfiguration mockWebAppConfig = context.mock(WebAppConfiguration.class, "testAppConfig");
 
         setCommonExpectations();
 
@@ -1028,9 +1032,32 @@ public class PluginGeneratorTest {
                 allowing(mockDefVhostRef).getProperty("allowFromEndpointRef");
                 will(returnValue(null));
 
-                // No applications deployed - vhostMgr returns empty
+                // Return default_host with a test application
                 allowing(mockVhostMgr).getVirtualHosts();
-                will(returnIterator());
+                will(returnIterator(mockDefaultHost));
+
+                allowing(mockDefaultHost).getName();
+                will(returnValue("default_host"));
+                allowing(mockDefaultHost).getAliases();
+                will(returnValue(Arrays.asList("*:80", "*:443", "*:49080", "*:49443")));
+                allowing(mockDefaultHost).getWebApps();
+                will(returnIterator(mockWebApp));
+
+                // Mock the WebApp and its configuration
+                allowing(mockWebApp).getName();
+                will(returnValue("testApp"));
+                allowing(mockWebApp).getConfiguration();
+                will(returnValue(mockWebAppConfig));
+                allowing(mockWebApp).getSessionCookieConfig();
+                will(returnValue(null)); // Will use defaults
+
+                // Mock the WebAppConfiguration
+                allowing(mockWebAppConfig).getContextRoot();
+                will(returnValue("/testApp"));
+                allowing(mockWebAppConfig).getVirtualHostName();
+                will(returnValue("default_host"));
+                allowing(mockWebAppConfig).getDisplayName();
+                will(returnValue("Test Application"));
 
                 allowing(mockBundleContext).getAllServiceReferences(null, "(&(enabled=true)(|(httpPort>=1)(httpsPort>=1))(service.pid=Endpoint1))");
                 will(returnValue(new ServiceReference<?>[] { mockEndpointInfoRef }));
@@ -1157,6 +1184,8 @@ public class PluginGeneratorTest {
         final ServiceReference<?> mockCustomVhostRef = context.mock(ServiceReference.class, "custom_hostRef");
         final WsResource mockTempWsResource2 = context.mock(WsResource.class, "tempResource2");
         final WsResource mockFinalWsResource2 = context.mock(WsResource.class, "finalResource2");
+        final WebApp mockWebApp2 = context.mock(WebApp.class, "customApp");
+        final WebAppConfiguration mockWebAppConfig2 = context.mock(WebAppConfiguration.class, "customAppConfig");
 
         setCommonExpectations();
 
@@ -1197,6 +1226,28 @@ public class PluginGeneratorTest {
                 will(returnValue("custom_host"));
                 allowing(mockCustomHost).getAliases();
                 will(returnValue(Arrays.asList("*:49080", "*:49443")));
+
+                // Add WebApp to custom_host only (default_host has no apps)
+                allowing(mockDefaultHost).getWebApps();
+                will(returnIterator()); // Empty - no apps on default_host
+                allowing(mockCustomHost).getWebApps();
+                will(returnIterator(mockWebApp2));
+
+                // Mock the WebApp and its configuration
+                allowing(mockWebApp2).getName();
+                will(returnValue("customApp"));
+                allowing(mockWebApp2).getConfiguration();
+                will(returnValue(mockWebAppConfig2));
+                allowing(mockWebApp2).getSessionCookieConfig();
+                will(returnValue(null)); // Will use defaults
+
+                // Mock the WebAppConfiguration - app is on custom_host
+                allowing(mockWebAppConfig2).getContextRoot();
+                will(returnValue("/customApp"));
+                allowing(mockWebAppConfig2).getVirtualHostName();
+                will(returnValue("custom_host"));
+                allowing(mockWebAppConfig2).getDisplayName();
+                will(returnValue("Custom Application"));
 
                 allowing(mockBundleContext).getAllServiceReferences(null, "(&(enabled=true)(|(httpPort>=1)(httpsPort>=1))(service.pid=Endpoint1))");
                 will(returnValue(new ServiceReference<?>[] { mockEndpointInfoRef }));
@@ -1293,7 +1344,8 @@ public class PluginGeneratorTest {
         assertTrue("Should have at least one VirtualHostGroup", vhGroups.getLength() >= 1);
 
         // Check for VirtualHost entries with the configured ports
-        // All matching aliases should be grouped into default_host
+        // Since custom_host has the matching aliases, it should have a VirtualHostGroup
+        // with the webserver ports (preserving the virtual host structure)
         boolean foundHttp = false;
         boolean foundHttps = false;
 
@@ -1306,8 +1358,8 @@ public class PluginGeneratorTest {
                 Element vhost = (Element) vhosts.item(j);
                 String name = vhost.getAttribute("Name");
 
-                // All matching aliases should be in default_host
-                if (vhGroupName.equals("default_host")) {
+                // Check for matching aliases in custom_host (which has the matching ports)
+                if (vhGroupName.equals("custom_host")) {
                     if (name.contains(":49080")) {
                         foundHttp = true;
                     }
@@ -1318,8 +1370,8 @@ public class PluginGeneratorTest {
             }
         }
 
-        assertTrue("Should find VirtualHost entry for HTTP port 49080 in default_host", foundHttp);
-        assertTrue("Should find VirtualHost entry for HTTPS port 49443 in default_host", foundHttps);
+        assertTrue("Should find VirtualHost entry for HTTP port 49080 in custom_host", foundHttp);
+        assertTrue("Should find VirtualHost entry for HTTPS port 49443 in custom_host", foundHttps);
         // rename generated file to leave a clean space for the next test, but keep the file for debug
         testfile.renameTo(new File(testClassesDir + "/webserverPortsWithCustomVirtualHost-plugin-cfg.xml"));
     }

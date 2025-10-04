@@ -348,34 +348,21 @@ public class PluginGenerator {
             }
 
             // Create the VirtualHostGroup and VirtualHost elements
-            if (!virtualHostSet.isEmpty() || !vhostAliasData.isEmpty()) {
-                // Collect all unique aliases across all virtual hosts
-                Set<String> allMatchingAliases = new HashSet<String>();
-                for (Map.Entry<String, List<VHostData>> entry : vhostAliasData.entrySet()) {
-                    List<VHostData> aliases = entry.getValue();
-                    if (aliases != null) {
-                        for (VHostData vh_aliasData : aliases) {
-                            allMatchingAliases.add(vh_aliasData.host + ":" + vh_aliasData.port);
-                        }
-                    }
+            for (DynamicVirtualHost vh : virtualHostSet) {
+                // Create the VirtualHostGroup in the plugin xml
+                Element vhElem = output.createElement("VirtualHostGroup");
+                vhElem.setAttribute("Name", vh.getName());
+                rootElement.appendChild(vhElem);
+
+                if (!vhostAliasData.containsKey(vh.getName())) {
+                    continue;
                 }
-
-                if (!allMatchingAliases.isEmpty()) {
-                    // Create a single VirtualHostGroup named "default_host" with all matching aliases
-                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                        Tr.debug(tc, "Creating default_host VirtualHostGroup with all matching aliases: " + allMatchingAliases);
-                    }
-
-                    Element vhElem = output.createElement("VirtualHostGroup");
-                    vhElem.setAttribute("Name", "default_host");
-                    rootElement.appendChild(vhElem);
-
-                    // Create a VirtualHost element for each unique alias
-                    for (String aliasName : allMatchingAliases) {
-                        Element aliasElem = output.createElement("VirtualHost");
-                        aliasElem.setAttribute("Name", aliasName);
-                        vhElem.appendChild(aliasElem);
-                    }
+                // Create a VirtualHost element for each alias
+                for (VHostData vh_aliasData : vhostAliasData.get(vh.getName())) {
+                    Element aliasElem = output.createElement("VirtualHost");
+                    // The IPv6 is already has the [] in alias
+                    aliasElem.setAttribute("Name", vh_aliasData.host + ":" + vh_aliasData.port);
+                    vhElem.appendChild(aliasElem);
                 }
             }
 
@@ -729,14 +716,24 @@ public class PluginGenerator {
 
             // ------------------------------------------
             // Create Routes
+            // Only create routes for virtual hosts that have matching aliases (matching webserver ports)
+            // Routes point to the original VirtualHostGroup name (preserving virtual host structure)
             for (DynamicVirtualHost vhost : virtualHostSet) {
                 for (ClusterUriGroup cug : cUgsSet) {
                     if (vhost.getName().equals(cug.vhostName)) {
-                        Element routeElem = output.createElement("Route");
-                        routeElem.setAttribute("VirtualHostGroup", vhost.getName());
-                        routeElem.setAttribute("UriGroup", cug.uriGroupName);
-                        routeElem.setAttribute("ServerCluster", cug.clusterName);
-                        rootElement.appendChild(routeElem);
+                        // Check if this virtual host has any matching aliases in vhostAliasData
+                        List<VHostData> aliasData = vhostAliasData.get(vhost.getName());
+                        boolean hasMatchingAliases = (aliasData != null && !aliasData.isEmpty());
+
+                        if (hasMatchingAliases) {
+                            // This vhost has matching aliases, so create a route pointing to the original vhost name
+                            Element routeElem = output.createElement("Route");
+                            routeElem.setAttribute("VirtualHostGroup", vhost.getName());
+                            routeElem.setAttribute("UriGroup", cug.uriGroupName);
+                            routeElem.setAttribute("ServerCluster", cug.clusterName);
+                            rootElement.appendChild(routeElem);
+                        }
+                        // If no matching aliases, skip creating the route
                     }
                 }
             }
@@ -1162,68 +1159,6 @@ public class PluginGenerator {
                 }
             }
 
-            // If no virtual hosts were found via VirtualHostManager (e.g., no apps deployed),
-            // but we have virtual host configurations, process them directly from the config
-            if (virtualHostSet.isEmpty() && !vhostConfigRefs.isEmpty()) {
-                for (Map.Entry<String, ServiceReference<?>> entry : vhostConfigRefs.entrySet()) {
-                    String vh_name = entry.getKey();
-                    ServiceReference<?> vhostConfig = entry.getValue();
-
-                    // Check endpoint restrictions
-                    if (blockedByRestrictions(vhostConfig.getProperty(HTTP_ALLOWED_ENDPOINT))) {
-                        if (TraceComponent.isAnyTracingEnabled() && tc.isEventEnabled()) {
-                            Tr.event(tc, "Virtual host " + vh_name + " is not accessible from configured endpoint (from config)",
-                                     "plugin endpoint = " + pcd.httpEndpointPid,
-                                     "vhost required endpoints = " + getList((String[]) vhostConfig.getProperty(HTTP_ALLOWED_ENDPOINT)));
-                        }
-                        continue;
-                    }
-
-                    // Get host aliases from configuration
-                    Object hostAliasProperty = vhostConfig.getProperty("hostAlias");
-                    List<String> vh_aliases = null;
-                    if (hostAliasProperty instanceof List) {
-                        vh_aliases = (List<String>) hostAliasProperty;
-                    } else if (hostAliasProperty instanceof String[]) {
-                        vh_aliases = Arrays.asList((String[]) hostAliasProperty);
-                    }
-
-                    if (vh_aliases == null || vh_aliases.isEmpty()) {
-                        if (TraceComponent.isAnyTracingEnabled() && tc.isEventEnabled()) {
-                            Tr.event(tc, "Virtual host " + vh_name + " has no defined host aliases (from config)");
-                        }
-                        continue;
-                    }
-
-                    List<VHostData> vh_aliasData_config = new ArrayList<VHostData>();
-
-                    for (String alias : vh_aliases) {
-                        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                            Tr.debug(tc, "iterating on virtual host config " + vh_name);
-                        }
-
-                        VHostData vh_alias = new VHostData(alias);
-
-                        if (vh_alias.port == pcd.webServerHttpPort) {
-                            foundWebserverHttpHostAlias = true;
-                        } else if (vh_alias.port == pcd.webServerHttpsPort) {
-                            foundWebserverHttpsHostAlias = true;
-                        } else {
-                            Tr.debug(tc, String.format("Alias: %s not added to plugin-cfg.xml; its port does not match either webServerHttpPort: %s or webServerHttpsPort: %s", alias, pcd.webServerHttpPort, pcd.webServerHttpsPort));
-                            continue; // Skip adding this virtual host alias
-                        }
-                        Tr.debug(tc, "adding (from config) " + vh_name + " -> " + alias);
-                        vh_aliasData_config.add(vh_alias);
-                        mapPortUsage(portToVHostNameMap, vh_name, vh_alias);
-                    }
-
-                    if (!vh_aliasData_config.isEmpty()) {
-                        // save the list of constructed VHostData
-                        vhostAliasData.put(vh_name, vh_aliasData_config);
-                    }
-                }
-            }
-
             // If we can, make sure we have aliases for the web server ports..
             List<VHostData> vh_aliasData = vhostAliasData.get(DEFAULT_VIRTUAL_HOST);
             if (pcd.webServerHttpPort > 0 && !foundWebserverHttpHostAlias) {
@@ -1264,7 +1199,7 @@ public class PluginGenerator {
             }
         }
 
-        if (virtualHostSet.isEmpty() && vhostAliasData.isEmpty()) {
+        if (virtualHostSet.isEmpty()) {
             // If we have a usable endpoint ref, get the pretty id.
             Comment comment = doc.createComment(String.format(" No virtual hosts are accessible from the configured endpoint (%s).%n\t "
                                                               + "Verify the allowed endpoints for the virtualHost elements in server.xml. ",
