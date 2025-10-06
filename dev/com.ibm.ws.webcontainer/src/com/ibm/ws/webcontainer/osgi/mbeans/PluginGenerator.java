@@ -1169,12 +1169,15 @@ public class PluginGenerator {
             // If we can, make sure we have aliases for the web server ports..
             List<VHostData> vh_aliasData = vhostAliasData.get(DEFAULT_VIRTUAL_HOST);
             if (pcd.webServerHttpPort > 0 && !foundWebserverHttpHostAlias) {
-                if (defaultHostIsCatchAll
-                    && vh_aliasData != null
+                if (vh_aliasData != null
                     && !blockedByRestrictions(defaultHost.getProperty(HTTP_ALLOWED_ENDPOINT))) {
                     VHostData vhostData = new VHostData("*", pcd.webServerHttpPort);
                     vh_aliasData.add(vhostData);
                     mapPortUsage(portToVHostNameMap, DEFAULT_VIRTUAL_HOST, vhostData);
+                    Comment comment = doc.createComment(String.format(" No host alias was found matching the webserver http port (*:%s).%n\t "
+                                                                      + "A wildcard host alias was generated for the default_host to ensure the webserver can still route requests. ",
+                                                                      pcd.webServerHttpPort));
+                    rootElement.appendChild(comment);
                 } else {
                     // the http port was configured, but there are no virtual hosts that can accept requests for that alias
                     Comment comment = doc.createComment(String.format(" No virtual hosts are configured to accept requests from the webserver http port (*:%s).%n\t "
@@ -1185,13 +1188,15 @@ public class PluginGenerator {
             }
 
             if (pcd.webServerHttpsPort > 0 && !foundWebserverHttpsHostAlias) {
-                if (defaultHostIsCatchAll
-                    && vh_aliasData != null
+                if (vh_aliasData != null
                     && !blockedByRestrictions(defaultHost.getProperty(HTTP_ALLOWED_ENDPOINT))) {
                     VHostData vhostData = new VHostData("*", pcd.webServerHttpsPort);
                     vh_aliasData.add(vhostData);
                     mapPortUsage(portToVHostNameMap, DEFAULT_VIRTUAL_HOST, vhostData);
-
+                    Comment comment = doc.createComment(String.format(" No host alias was found matching the webserver https port (*:%s).%n\t "
+                                                                      + "A wildcard host alias was generated for the default_host to ensure the webserver can still route requests. ",
+                                                                      pcd.webServerHttpsPort));
+                    rootElement.appendChild(comment);
                 } else {
                     // the http port was configured, but there are no virtual hosts that can accept requests for that alias
                     Comment comment = doc.createComment(String.format(" No virtual hosts are configured to accept requests from the webserver https port (*:%s).%n\t "
