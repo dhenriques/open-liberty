@@ -1635,6 +1635,214 @@ public class PluginGeneratorTest {
                    outputMgr.checkForStandardOut("Generated a catchall default_host"));
     }
 
+    @Test
+    public void testNoVirtualHostsReturnsEmpty() throws Exception {
+        setCommonExpectations();
+
+        context.checking(new Expectations() {
+            {
+                allowing(mockLocationAdmin).getServerName();
+                will(returnValue("SystemProvidedServerName"));
+
+                // Return only default_host in config (catch-all)
+                allowing(mockBundleContext).getAllServiceReferences(null, "(&(service.factoryPid=com.ibm.ws.http.virtualhost)(|(enabled=true)(id=default_host)))");
+                will(returnValue(new ServiceReference<?>[] { mockDefVhostRef }));
+
+                allowing(mockDefVhostRef).getProperty("id");
+                will(returnValue("default_host"));
+                allowing(mockDefVhostRef).getProperty("hostAlias");
+                will(returnValue(null)); // Catch-all
+                allowing(mockDefVhostRef).getProperty("allowFromEndpointRef");
+                will(returnValue(null));
+
+                // VirtualHostManager returns NO virtual hosts (vh == null scenario)
+                allowing(mockVhostMgr).getVirtualHosts();
+                will(returnIterator()); // Empty iterator - no virtual hosts
+            }
+        });
+
+        Map<String, Object> config = new HashMap<String, Object>();
+        setDefaultConfig(config);
+        Map<String, List<VHostData>> vhostAliasData = new HashMap<String, List<VHostData>>();
+        PluginGenerator pluginGen = new PluginGenerator(config, mockLocationAdmin, mockBundleContext);
+
+        // Process virtual hosts
+        Set<DynamicVirtualHost> virtualHostSet = pluginGen.processVirtualHosts(mockVhostMgr, vhostAliasData, mockEndpointInfo, element);
+
+        // Should return empty set
+        assertEquals("virtualHostSet should be empty when no virtual hosts exist", 0, virtualHostSet.size());
+        assertTrue("vhostAliasData should be empty", vhostAliasData.isEmpty());
+
+        // Verify warning comment about no virtual hosts
+        assertTrue("Should have comment about no virtual hosts found",
+                   outputMgr.checkForStandardOut("No Virtual Hosts were found"));
+        assertTrue("Should suggest verifying applications",
+                   outputMgr.checkForStandardOut("Verify that at least one application is defined"));
+    }
+
+    @Test
+    public void testBothWebserverPortsDisabled() throws Exception {
+        setCommonVHostExpectations();
+        context.checking(new Expectations() {
+            {
+                // Catch-all default_host
+                allowing(mockDefVhostRef).getProperty("hostAlias");
+                will(returnValue(null));
+                allowing(mockDefVhostRef).getProperty("allowFromEndpointRef");
+                will(returnValue(null));
+                allowing(mockEndpointInfo).getEndpointId();
+                will(returnValue(mockEndpointInfo.toString()));
+            }
+        });
+
+        Map<String, Object> config = new HashMap<String, Object>();
+        setDefaultConfig(config);
+        // Disable both ports
+        config.put("webserverPort", "-1");
+        config.put("webserverSecurePort", "-1");
+
+        Map<String, List<VHostData>> vhostAliasData = new HashMap<String, List<VHostData>>();
+        PluginGenerator pluginGen = new PluginGenerator(config, mockLocationAdmin, mockBundleContext);
+
+        // Process virtual hosts
+        Set<DynamicVirtualHost> virtualHostSet = pluginGen.processVirtualHosts(mockVhostMgr, vhostAliasData, mockEndpointInfo, element);
+
+        // Should have default_host but with NO aliases (both ports disabled)
+        assertEquals("Should have one virtual host", 1, virtualHostSet.size());
+        assertSame("Should be default_host", mockDefaultHost, virtualHostSet.iterator().next());
+
+        // vhostAliasData should NOT contain default_host (no aliases generated when both ports disabled)
+        assertTrue("vhostAliasData should be empty when both ports disabled",
+                   vhostAliasData.isEmpty() || !vhostAliasData.containsKey("default_host") || vhostAliasData.get("default_host").isEmpty());
+
+        // Verify warning comment about disabled ports
+        assertTrue("Should have comment about both ports being disabled",
+                   outputMgr.checkForStandardOut("Both of the plugin web server ports are disabled"));
+        assertTrue("Should mention default_host will be empty",
+                   outputMgr.checkForStandardOut("The default_host will be empty"));
+    }
+
+    @Test
+    public void testOnlyHttpPortEnabled() throws Exception {
+        setCommonVHostExpectations();
+        context.checking(new Expectations() {
+            {
+                // Catch-all default_host
+                allowing(mockDefVhostRef).getProperty("hostAlias");
+                will(returnValue(null));
+                allowing(mockDefVhostRef).getProperty("allowFromEndpointRef");
+                will(returnValue(null));
+                allowing(mockEndpointInfo).getEndpointId();
+                will(returnValue(mockEndpointInfo.toString()));
+            }
+        });
+
+        Map<String, Object> config = new HashMap<String, Object>();
+        setDefaultConfig(config);
+        // Only HTTP enabled, HTTPS disabled
+        config.put("webserverSecurePort", "-1");
+
+        Map<String, List<VHostData>> vhostAliasData = new HashMap<String, List<VHostData>>();
+        PluginGenerator pluginGen = new PluginGenerator(config, mockLocationAdmin, mockBundleContext);
+
+        // Process virtual hosts
+        Set<DynamicVirtualHost> virtualHostSet = pluginGen.processVirtualHosts(mockVhostMgr, vhostAliasData, mockEndpointInfo, element);
+
+        // Should have default_host with only HTTP alias
+        assertEquals("Should have one virtual host", 1, virtualHostSet.size());
+        List<VHostData> data = vhostAliasData.get("default_host");
+        assertNotNull("default_host should be in vhostAliasData", data);
+        assertEquals("Should have only one alias (HTTP)", 1, data.size());
+        assertTrue("Should contain wildcard for *:9080", data.contains(new VHostData("*", 9080)));
+        assertFalse("Should NOT contain HTTPS wildcard", data.contains(new VHostData("*", 9443)));
+
+        // Verify informational comment mentions only HTTP port
+        assertTrue("Should mention HTTP port in comment",
+                   outputMgr.checkForStandardOut("webserverPort=9080"));
+        assertFalse("Should NOT mention HTTPS port in generated aliases comment",
+                    outputMgr.checkForStandardOut("webserverSecurePort=9443"));
+    }
+
+    @Test
+    public void testOnlyHttpsPortEnabled() throws Exception {
+        setCommonVHostExpectations();
+        context.checking(new Expectations() {
+            {
+                // Catch-all default_host
+                allowing(mockDefVhostRef).getProperty("hostAlias");
+                will(returnValue(null));
+                allowing(mockDefVhostRef).getProperty("allowFromEndpointRef");
+                will(returnValue(null));
+                allowing(mockEndpointInfo).getEndpointId();
+                will(returnValue(mockEndpointInfo.toString()));
+            }
+        });
+
+        Map<String, Object> config = new HashMap<String, Object>();
+        setDefaultConfig(config);
+        // Only HTTPS enabled, HTTP disabled
+        config.put("webserverPort", "-1");
+
+        Map<String, List<VHostData>> vhostAliasData = new HashMap<String, List<VHostData>>();
+        PluginGenerator pluginGen = new PluginGenerator(config, mockLocationAdmin, mockBundleContext);
+
+        // Process virtual hosts
+        Set<DynamicVirtualHost> virtualHostSet = pluginGen.processVirtualHosts(mockVhostMgr, vhostAliasData, mockEndpointInfo, element);
+
+        // Should have default_host with only HTTPS alias
+        assertEquals("Should have one virtual host", 1, virtualHostSet.size());
+        List<VHostData> data = vhostAliasData.get("default_host");
+        assertNotNull("default_host should be in vhostAliasData", data);
+        assertEquals("Should have only one alias (HTTPS)", 1, data.size());
+        assertTrue("Should contain wildcard for *:9443", data.contains(new VHostData("*", 9443)));
+        assertFalse("Should NOT contain HTTP wildcard", data.contains(new VHostData("*", 9080)));
+
+        // Verify informational comment mentions only HTTPS port
+        assertTrue("Should mention HTTPS port in comment",
+                   outputMgr.checkForStandardOut("webserverSecurePort=9443"));
+        assertFalse("Should NOT mention HTTP port in generated aliases comment",
+                    outputMgr.checkForStandardOut("webserverPort=9080"));
+    }
+
+    @Test
+    public void testHttpPortNotConfigured() throws Exception {
+        setCommonVHostExpectations();
+        context.checking(new Expectations() {
+            {
+                // Catch-all default_host
+                allowing(mockDefVhostRef).getProperty("hostAlias");
+                will(returnValue(null));
+                allowing(mockDefVhostRef).getProperty("allowFromEndpointRef");
+                will(returnValue(null));
+                allowing(mockEndpointInfo).getEndpointId();
+                will(returnValue(mockEndpointInfo.toString()));
+            }
+        });
+
+        Map<String, Object> config = new HashMap<String, Object>();
+        setDefaultConfig(config);
+        // HTTP not configured (0), HTTPS enabled
+        config.put("webserverPort", "0");
+
+        Map<String, List<VHostData>> vhostAliasData = new HashMap<String, List<VHostData>>();
+        PluginGenerator pluginGen = new PluginGenerator(config, mockLocationAdmin, mockBundleContext);
+
+        // Process virtual hosts
+        Set<DynamicVirtualHost> virtualHostSet = pluginGen.processVirtualHosts(mockVhostMgr, vhostAliasData, mockEndpointInfo, element);
+
+        // Should have default_host with only HTTPS alias (HTTP=0 means not configured, skip it)
+        assertEquals("Should have one virtual host", 1, virtualHostSet.size());
+        List<VHostData> data = vhostAliasData.get("default_host");
+        assertNotNull("default_host should be in vhostAliasData", data);
+        assertEquals("Should have only one alias (HTTPS)", 1, data.size());
+        assertTrue("Should contain wildcard for *:9443", data.contains(new VHostData("*", 9443)));
+        assertFalse("Should NOT contain HTTP wildcard when port=0", data.contains(new VHostData("*", 0)));
+
+        // Verify informational comment mentions only HTTPS port (HTTP not configured)
+        assertTrue("Should mention HTTPS port in comment",
+                   outputMgr.checkForStandardOut("webserverSecurePort=9443"));
+    }
+
     // Helper method to write server.xml for single virtual host tests
     private void writeServerXML(String filename, String endpointId, String host, String httpPort, String httpsPort,
                                 String[] vhostConfig, String webserverPort, String webserverSecurePort) {
