@@ -1166,6 +1166,15 @@ public class PluginGenerator {
                 }
             }
 
+            // Add informational comment about alias filtering
+            if (!virtualHostSet.isEmpty() && (pcd.webServerHttpPort > 0 || pcd.webServerHttpsPort > 0)) {
+                Comment comment = doc.createComment(String.format(" Virtual host aliases have been automatically filtered to include only those matching the configured web server ports:%n\t\t%s%s%s ",
+                        (pcd.webServerHttpPort > 0 ? "webserverPort=" + pcd.webServerHttpPort : ""),
+                        (pcd.webServerHttpPort > 0 && pcd.webServerHttpsPort > 0 ? "\n\t\t" : ""),
+                        (pcd.webServerHttpsPort > 0 ? "webserverSecurePort=" + pcd.webServerHttpsPort : "")));
+                rootElement.appendChild(comment);
+            }
+
             // Handle custom virtual hosts scenario:
             // If one or more custom (non-default) virtual hosts exist but default_host is not explicitly defined,
             // create a catchall default_host for any unmatched webserver ports

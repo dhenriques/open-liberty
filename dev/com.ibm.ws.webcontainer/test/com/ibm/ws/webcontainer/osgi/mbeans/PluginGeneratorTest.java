@@ -296,6 +296,10 @@ public class PluginGeneratorTest {
         assertNotNull("There should be a default_host element in the vhostAliasData map", data);
         assertEquals("VHostData should be empty when no aliases match webserver ports", 0, data.size());
 
+        // Verify comment about alias filtering
+        assertTrue("Should have comment about filtering aliases",
+                   outputMgr.checkForStandardOut("Virtual host aliases have been automatically filtered to include only those matching the configured web server ports"));
+
         // Verify that warning comments are logged about the missing webserver ports
         assertTrue("comment about missing port 9080", outputMgr.checkForStandardOut("No virtual hosts are configured to accept requests from the webserver http port \\(\\*:9080\\)"));
         assertTrue("comment about missing port 9443", outputMgr.checkForStandardOut("No virtual hosts are configured to accept requests from the webserver https port \\(\\*:9443\\)"));
@@ -1549,6 +1553,10 @@ public class PluginGeneratorTest {
         assertEquals("VHostData should contain only the matching HTTP port", 1, data.size());
         assertTrue("VHostData should contain an alias for *:9080", data.contains(new VHostData("*", 9080)));
         assertFalse("VHostData should NOT contain an alias for *:8443", data.contains(new VHostData("*", 8443)));
+
+        // Verify comment about alias filtering
+        assertTrue("Should have comment about filtering aliases",
+                   outputMgr.checkForStandardOut("Virtual host aliases have been automatically filtered to include only those matching the configured web server ports"));
 
         // Verify warning for missing HTTPS port (9443), but NOT for HTTP port (9080 is covered)
         assertFalse("Should NOT have warning about HTTP port (it matches)",
