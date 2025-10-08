@@ -145,6 +145,9 @@ public class PluginGenerator {
     private Integer previousConfigHash = null;
     private File cachedFile;
 
+    // Track whether we've already traced the raw server.xml to avoid duplicate output
+    private boolean hasTracedRawServerXml = false;
+
     public static final String XALAN_TRANSFORMER_FACTORY_CLASS_NAME = "org.apache.xalan.processor.TransformerFactoryImpl";
     public static final String IBM_XLTXEJ_COMPILED_TRANSFORMER_FACTORY_CLASS_NAME = "com.ibm.xtq.xslt.jaxp.compiler.TransformerFactoryImpl";
     public static final String SAX_LEXICAL_HANDLER_CLASS_NAME = "org.xml.sax.ext.LexicalHandler";
@@ -1015,6 +1018,64 @@ public class PluginGenerator {
 
         // All registered virtual host configurations (transport side)
         Map<String, ServiceReference<?>> vhostConfigRefs = getVirtualHostRefs();
+
+        // Trace the raw server.xml virtual host configuration input (only once per PluginGenerator instance)
+        if (!hasTracedRawServerXml && TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+            StringBuilder vhostConfigTrace = new StringBuilder("Raw server.xml virtual host configuration:");
+            for (Map.Entry<String, ServiceReference<?>> entry : vhostConfigRefs.entrySet()) {
+                vhostConfigTrace.append(String.format("%n  <virtualHost id=\"%s\"", entry.getKey()));
+                ServiceReference<?> ref = entry.getValue();
+                Object hostAliases = ref.getProperty("hostAlias");
+                Object allowedEndpoints = ref.getProperty("allowFromEndpointRef");
+
+                // Format hostAlias as readable list
+                if (hostAliases != null && hostAliases instanceof String[]) {
+                    String[] aliases = (String[]) hostAliases;
+                    if (aliases.length > 0) {
+                        vhostConfigTrace.append(">");
+                        for (String alias : aliases) {
+                            vhostConfigTrace.append(String.format("%n    <hostAlias>%s</hostAlias>", alias));
+                        }
+                    } else {
+                        vhostConfigTrace.append(">");
+                    }
+                } else if (hostAliases != null && hostAliases instanceof List) {
+                    List<?> aliases = (List<?>) hostAliases;
+                    if (!aliases.isEmpty()) {
+                        vhostConfigTrace.append(">");
+                        for (Object alias : aliases) {
+                            vhostConfigTrace.append(String.format("%n    <hostAlias>%s</hostAlias>", alias));
+                        }
+                    } else {
+                        vhostConfigTrace.append(">");
+                    }
+                } else {
+                    vhostConfigTrace.append(">");
+                    vhostConfigTrace.append(String.format("%n    <!-- No hostAlias defined (catch-all) -->"));
+                }
+
+                // Format allowFromEndpointRef if present
+                if (allowedEndpoints != null) {
+                    if (allowedEndpoints instanceof String[]) {
+                        for (String endpoint : (String[]) allowedEndpoints) {
+                            vhostConfigTrace.append(String.format("%n    <allowFromEndpointRef>%s</allowFromEndpointRef>", endpoint));
+                        }
+                    } else if (allowedEndpoints instanceof List) {
+                        for (Object endpoint : (List<?>) allowedEndpoints) {
+                            vhostConfigTrace.append(String.format("%n    <allowFromEndpointRef>%s</allowFromEndpointRef>", endpoint));
+                        }
+                    } else {
+                        vhostConfigTrace.append(String.format("%n    <allowFromEndpointRef>%s</allowFromEndpointRef>", allowedEndpoints));
+                    }
+                }
+
+                vhostConfigTrace.append(String.format("%n  </virtualHost>"));
+            }
+            vhostConfigTrace.append(String.format("%n  <!-- pluginConfiguration webserver ports: HTTP=%s, HTTPS=%s -->",
+                    pcd.webServerHttpPort, pcd.webServerHttpsPort));
+            Tr.debug(tc, vhostConfigTrace.toString());
+            hasTracedRawServerXml = true;
+        }
 
         // Set of discovered virtual hosts
         Set<DynamicVirtualHost> virtualHostSet = new HashSet<DynamicVirtualHost>();
