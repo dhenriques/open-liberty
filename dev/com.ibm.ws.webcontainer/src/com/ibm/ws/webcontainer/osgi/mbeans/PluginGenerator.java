@@ -782,8 +782,15 @@ public class PluginGenerator {
                 Tr.debug(tc, "Output file already exists : " + fileExists);
             }
 
+            // Check if force regeneration is enabled via system property
+            boolean forceRegenerate = Boolean.parseBoolean(System.getProperty("com.ibm.ws.plugin.forceRegenerate", "false"));
+
             // Check to see if the config has changed
-            writeFile = hasConfigChanged(output);
+            writeFile = forceRegenerate || hasConfigChanged(output);
+
+            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                Tr.debug(tc, "forceRegenerate=" + forceRegenerate + ", writeFile=" + writeFile);
+            }
 
             // Only write out to file if we have new or changed configuration information, or if this is an explicit request
             if (writeFile || !utilityRequest || !fileExists) {
