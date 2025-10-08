@@ -330,6 +330,8 @@ public class PluginGeneratorTest {
 
                 allowing(mockAltVhostRef).getProperty("id");
                 will(returnValue("alternate"));
+                allowing(mockAltVhostRef).getProperty("hostAlias");
+                will(returnValue(Arrays.asList("*:3", "*:4")));
                 allowing(mockAltVhostRef).getProperty("allowFromEndpointRef");
                 will(returnValue(null));
 
