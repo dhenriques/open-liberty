@@ -1166,8 +1166,72 @@ public class PluginGenerator {
                 }
             }
 
-            // Check if webserver ports have matching aliases
-            // For explicit virtual host configurations, we do not generate wildcards
+            // Handle custom virtual hosts scenario:
+            // If one or more custom (non-default) virtual hosts exist but default_host is not explicitly defined,
+            // create a catchall default_host for any unmatched webserver ports
+            boolean hasCustomVirtualHosts = false;
+            boolean defaultHostExplicitlyDefined = defaultHost != null && defaultHost.getProperty("hostAlias") != null;
+
+            for (DynamicVirtualHost vh : virtualHostSet) {
+                if (!DEFAULT_VIRTUAL_HOST.equals(vh.getName())) {
+                    hasCustomVirtualHosts = true;
+                    break;
+                }
+            }
+
+            // Custom virtual hosts exist without explicit default_host: generate wildcards for unmatched ports
+            if (hasCustomVirtualHosts && !defaultHostExplicitlyDefined) {
+                List<VHostData> generatedAliases = new ArrayList<VHostData>();
+
+                if (pcd.webServerHttpPort > 0 && !foundWebserverHttpHostAlias) {
+                    VHostData vhostData = new VHostData("*", pcd.webServerHttpPort);
+                    generatedAliases.add(vhostData);
+                    mapPortUsage(portToVHostNameMap, DEFAULT_VIRTUAL_HOST, vhostData);
+                    foundWebserverHttpHostAlias = true; // Mark as found to prevent warning
+                    Comment comment = doc.createComment(String.format(" No virtual host had an alias matching the webserver http port (*:%s).%n\t "
+                                                                      + "Generated a catchall default_host with a wildcard alias to ensure the webserver can route requests. ",
+                                                                      pcd.webServerHttpPort));
+                    rootElement.appendChild(comment);
+                }
+
+                if (pcd.webServerHttpsPort > 0 && !foundWebserverHttpsHostAlias) {
+                    VHostData vhostData = new VHostData("*", pcd.webServerHttpsPort);
+                    generatedAliases.add(vhostData);
+                    mapPortUsage(portToVHostNameMap, DEFAULT_VIRTUAL_HOST, vhostData);
+                    foundWebserverHttpsHostAlias = true; // Mark as found to prevent warning
+                    Comment comment = doc.createComment(String.format(" No virtual host had an alias matching the webserver https port (*:%s).%n\t "
+                                                                      + "Generated a catchall default_host with a wildcard alias to ensure the webserver can route requests. ",
+                                                                      pcd.webServerHttpsPort));
+                    rootElement.appendChild(comment);
+                }
+
+                // If we generated any aliases, add the catchall default_host to the virtual host set and alias data
+                if (!generatedAliases.isEmpty()) {
+                    // Create a synthetic DynamicVirtualHost for default_host
+                    // We need to add it to virtualHostSet so it gets a VirtualHostGroup in the XML
+                    DynamicVirtualHost defaultVh = null;
+                    for (Iterator<DynamicVirtualHost> i = vhostMgr.getVirtualHosts(); i.hasNext();) {
+                        DynamicVirtualHost vh = i.next();
+                        if (DEFAULT_VIRTUAL_HOST.equals(vh.getName())) {
+                            defaultVh = vh;
+                            break;
+                        }
+                    }
+
+                    if (defaultVh != null) {
+                        virtualHostSet.add(defaultVh);
+                        vhostAliasData.put(DEFAULT_VIRTUAL_HOST, generatedAliases);
+                    }
+                } else {
+                    // All webserver ports are matched by custom virtual hosts, no default_host needed
+                    Comment comment = doc.createComment(String.format(" All webserver ports are handled by custom virtual hosts.%n\t "
+                                                                      + "No default_host VirtualHostGroup was generated. "));
+                    rootElement.appendChild(comment);
+                }
+            }
+
+            // Handle explicit virtual host configurations (default_host only or custom hosts with explicit default_host):
+            // Do not generate wildcards - only add warning comments for missing webserver port aliases
             if (pcd.webServerHttpPort > 0 && !foundWebserverHttpHostAlias) {
                 // the http port was configured, but there are no virtual hosts that can accept requests for that alias
                 Comment comment = doc.createComment(String.format(" No virtual hosts are configured to accept requests from the webserver http port (*:%s).%n\t "

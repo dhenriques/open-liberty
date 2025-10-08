@@ -289,17 +289,16 @@ public class PluginGeneratorTest {
         assertEquals("There should be one element in the virtual host set", 1, virtualHostSet.size());
         assertSame("The default host object should be in the virtual host set", mockDefaultHost, virtualHostSet.iterator().next());
 
-        // vhostAliasData will contain default_host with generated wildcard aliases
+        // vhostAliasData will contain default_host but with empty list (no aliases match webserver ports)
+        // For explicit default_host only configurations, we do NOT generate wildcards
         assertEquals("vhostAliasData should contain default_host", 1, vhostAliasData.size());
         List<VHostData> data = vhostAliasData.get("default_host");
         assertNotNull("There should be a default_host element in the vhostAliasData map", data);
-        assertEquals("VHostData should contain generated wildcard aliases for webserver ports", 2, data.size());
-        assertTrue("VHostData should contain an alias for *:80", data.contains(new VHostData("*", 80)));
-        assertTrue("VHostData should contain an alias for *:443", data.contains(new VHostData("*", 443)));
+        assertEquals("VHostData should be empty when no aliases match webserver ports", 0, data.size());
 
-        // Verify that informational comments are logged about the generated wildcard aliases
-        assertTrue("comment about generated wildcard alias for port 80", outputMgr.checkForStandardOut("No host alias was found matching the webserver http port \\(\\*:80\\)"));
-        assertTrue("comment about generated wildcard alias for port 443", outputMgr.checkForStandardOut("No host alias was found matching the webserver https port \\(\\*:443\\)"));
+        // Verify that warning comments are logged about the missing webserver ports
+        assertTrue("comment about missing port 80", outputMgr.checkForStandardOut("No virtual hosts are configured to accept requests from the webserver http port \\(\\*:80\\)"));
+        assertTrue("comment about missing port 443", outputMgr.checkForStandardOut("No virtual hosts are configured to accept requests from the webserver https port \\(\\*:443\\)"));
         vhostAliasData.clear();
     }
 
