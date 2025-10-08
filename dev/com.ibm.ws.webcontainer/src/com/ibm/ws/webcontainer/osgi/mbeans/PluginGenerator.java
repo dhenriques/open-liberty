@@ -255,10 +255,12 @@ public class PluginGenerator {
 
             Document output = DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument();
 
-            SimpleDateFormat tmpDateFmt = new SimpleDateFormat("yyyy.MM.dd 'at' HH:mm:ss z");
-            Comment comment = output.createComment(String.format("HTTP server plugin config file for %s generated on %s",
+            SimpleDateFormat tmpDateFmt = new SimpleDateFormat("yyyy.MM.dd 'at' hh:mm:ss a z");
+            String version = "1.1"; // Plugin generator version
+            Comment comment = output.createComment(String.format("HTTP server plugin config file for %s generated on %s (Plugin Generator v%s)",
                                                                  appServerName,
-                                                                 tmpDateFmt.format(new Date())));
+                                                                 tmpDateFmt.format(new Date()),
+                                                                 version));
             output.appendChild(comment);
 
             // create and insert a config root element
