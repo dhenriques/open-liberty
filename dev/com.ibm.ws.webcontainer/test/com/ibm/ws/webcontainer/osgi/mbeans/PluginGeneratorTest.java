@@ -1377,6 +1377,264 @@ public class PluginGeneratorTest {
         testfile.renameTo(new File(testClassesDir + "/customHostWithExplicitDefaultHost-plugin-cfg.xml"));
     }
 
+    @Test
+    public void testCustomHostWithoutDefaultHostGeneratesCatchAll() throws Exception {
+        final DynamicVirtualHost mockCustomHost = context.mock(DynamicVirtualHost.class, "custom_host");
+        final ServiceReference<?> mockCustomVhostRef = context.mock(ServiceReference.class, "custom_hostRef");
+
+        setCommonExpectations();
+
+        context.checking(new Expectations() {
+            {
+                allowing(mockLocationAdmin).getServerName();
+                will(returnValue("SystemProvidedServerName"));
+
+                // Return only custom_host (NO default_host in config)
+                allowing(mockBundleContext).getAllServiceReferences(null, "(&(service.factoryPid=com.ibm.ws.http.virtualhost)(|(enabled=true)(id=default_host)))");
+                will(returnValue(new ServiceReference<?>[] { mockCustomVhostRef }));
+
+                // custom_host configuration with ports that DON'T match webserver ports
+                allowing(mockCustomVhostRef).getProperty("id");
+                will(returnValue("custom_host"));
+                allowing(mockCustomVhostRef).getProperty("hostAlias");
+                will(returnValue(Arrays.asList("myapp.com:8080", "myapp.com:8443")));
+                allowing(mockCustomVhostRef).getProperty("allowFromEndpointRef");
+                will(returnValue(null));
+
+                // VirtualHostManager returns both custom_host AND default_host (default_host exists but not in config)
+                allowing(mockVhostMgr).getVirtualHosts();
+                will(returnIterator(mockCustomHost, mockDefaultHost));
+
+                allowing(mockCustomHost).getName();
+                will(returnValue("custom_host"));
+                allowing(mockCustomHost).getAliases();
+                will(returnValue(Arrays.asList("myapp.com:8080", "myapp.com:8443")));
+
+                // default_host exists in runtime but has no explicit config
+                allowing(mockDefaultHost).getName();
+                will(returnValue("default_host"));
+                allowing(mockDefaultHost).getAliases();
+                will(returnValue(Arrays.asList())); // No aliases from runtime
+            }
+        });
+
+        Map<String, Object> config = new HashMap<String, Object>();
+        setDefaultConfig(config);
+        Map<String, List<VHostData>> vhostAliasData = new HashMap<String, List<VHostData>>();
+        PluginGenerator pluginGen = new PluginGenerator(config, mockLocationAdmin, mockBundleContext);
+
+        // Process virtual hosts
+        Set<DynamicVirtualHost> virtualHostSet = pluginGen.processVirtualHosts(mockVhostMgr, vhostAliasData, mockEndpointInfo, element);
+
+        // Should have both custom_host and generated default_host
+        assertEquals("Should have two virtual hosts (custom_host + generated default_host)", 2, virtualHostSet.size());
+
+        // Check custom_host has no aliases (ports don't match)
+        List<VHostData> customData = vhostAliasData.get("custom_host");
+        assertNotNull("custom_host should be in vhostAliasData", customData);
+        assertEquals("custom_host should have no matching aliases", 0, customData.size());
+
+        // Check default_host was generated with wildcards for webserver ports
+        List<VHostData> defaultData = vhostAliasData.get("default_host");
+        assertNotNull("default_host should be generated in vhostAliasData", defaultData);
+        assertEquals("default_host should have 2 wildcard aliases", 2, defaultData.size());
+        assertTrue("default_host should contain wildcard for *:80", defaultData.contains(new VHostData("*", 80)));
+        assertTrue("default_host should contain wildcard for *:443", defaultData.contains(new VHostData("*", 443)));
+
+        // Verify comments about generated catchall default_host
+        assertTrue("Should have comment about generated HTTP wildcard",
+                   outputMgr.checkForStandardOut("No virtual host had an alias matching the webserver http port \\(\\*:80\\)"));
+        assertTrue("Should have comment about generated HTTPS wildcard",
+                   outputMgr.checkForStandardOut("No virtual host had an alias matching the webserver https port \\(\\*:443\\)"));
+        assertTrue("Should mention catchall default_host generation",
+                   outputMgr.checkForStandardOut("Generated a catchall default_host"));
+    }
+
+    @Test
+    public void testCustomHostWithoutDefaultHostAllPortsMatched() throws Exception {
+        final DynamicVirtualHost mockCustomHost = context.mock(DynamicVirtualHost.class, "custom_host");
+        final ServiceReference<?> mockCustomVhostRef = context.mock(ServiceReference.class, "custom_hostRef");
+
+        setCommonExpectations();
+
+        context.checking(new Expectations() {
+            {
+                allowing(mockLocationAdmin).getServerName();
+                will(returnValue("SystemProvidedServerName"));
+
+                // Return only custom_host (NO default_host in config)
+                allowing(mockBundleContext).getAllServiceReferences(null, "(&(service.factoryPid=com.ibm.ws.http.virtualhost)(|(enabled=true)(id=default_host)))");
+                will(returnValue(new ServiceReference<?>[] { mockCustomVhostRef }));
+
+                // custom_host configuration with ports that MATCH webserver ports
+                allowing(mockCustomVhostRef).getProperty("id");
+                will(returnValue("custom_host"));
+                allowing(mockCustomVhostRef).getProperty("hostAlias");
+                will(returnValue(Arrays.asList("myapp.com:80", "myapp.com:443")));
+                allowing(mockCustomVhostRef).getProperty("allowFromEndpointRef");
+                will(returnValue(null));
+
+                // VirtualHostManager returns only custom_host (no default_host in runtime)
+                allowing(mockVhostMgr).getVirtualHosts();
+                will(returnIterator(mockCustomHost));
+
+                allowing(mockCustomHost).getName();
+                will(returnValue("custom_host"));
+                allowing(mockCustomHost).getAliases();
+                will(returnValue(Arrays.asList("myapp.com:80", "myapp.com:443")));
+            }
+        });
+
+        Map<String, Object> config = new HashMap<String, Object>();
+        setDefaultConfig(config);
+        Map<String, List<VHostData>> vhostAliasData = new HashMap<String, List<VHostData>>();
+        PluginGenerator pluginGen = new PluginGenerator(config, mockLocationAdmin, mockBundleContext);
+
+        // Process virtual hosts
+        Set<DynamicVirtualHost> virtualHostSet = pluginGen.processVirtualHosts(mockVhostMgr, vhostAliasData, mockEndpointInfo, element);
+
+        // Should have only custom_host (no default_host generated)
+        assertEquals("Should have only one virtual host (custom_host)", 1, virtualHostSet.size());
+        DynamicVirtualHost vh = virtualHostSet.iterator().next();
+        assertEquals("Virtual host should be custom_host", "custom_host", vh.getName());
+
+        // Check custom_host has matching aliases (both ports match)
+        List<VHostData> customData = vhostAliasData.get("custom_host");
+        assertNotNull("custom_host should be in vhostAliasData", customData);
+        assertEquals("custom_host should have 2 matching aliases", 2, customData.size());
+        assertTrue("custom_host should contain myapp.com:80", customData.contains(new VHostData("myapp.com", 80)));
+        assertTrue("custom_host should contain myapp.com:443", customData.contains(new VHostData("myapp.com", 443)));
+
+        // Check default_host was NOT generated (all ports handled by custom_host)
+        List<VHostData> defaultData = vhostAliasData.get("default_host");
+        assertTrue("default_host should NOT be generated", defaultData == null || defaultData.isEmpty());
+
+        // Verify comment about all ports being handled
+        assertTrue("Should have comment about all ports handled by custom hosts",
+                   outputMgr.checkForStandardOut("All webserver ports are handled by custom virtual hosts"));
+        assertTrue("Should mention no default_host generated",
+                   outputMgr.checkForStandardOut("No default_host VirtualHostGroup was generated"));
+    }
+
+    @Test
+    public void testExplicitDefaultHostWithPartialPortMatches() throws Exception {
+        setCommonVHostExpectations();
+        context.checking(new Expectations() {
+            {
+                // Explicit default_host with only ONE port matching (HTTP matches, HTTPS doesn't)
+                allowing(mockDefVhostRef).getProperty("hostAlias");
+                will(returnValue(Arrays.asList("*:80", "*:8443"))); // 80 matches, 8443 doesn't match 443
+                allowing(mockDefVhostRef).getProperty("allowFromEndpointRef");
+                will(returnValue(null));
+
+                one(mockDefaultHost).getAliases();
+                will(returnValue(Arrays.asList("*:80", "*:8443")));
+            }
+        });
+
+        Map<String, Object> config = new HashMap<String, Object>();
+        setDefaultConfig(config); // webserver ports are 80 and 443
+        Map<String, List<VHostData>> vhostAliasData = new HashMap<String, List<VHostData>>();
+        PluginGenerator pluginGen = new PluginGenerator(config, mockLocationAdmin, mockBundleContext);
+
+        // Process virtual hosts
+        Set<DynamicVirtualHost> virtualHostSet = pluginGen.processVirtualHosts(mockVhostMgr, vhostAliasData, mockEndpointInfo, element);
+        assertEquals("Should have one element in the virtual host set", 1, virtualHostSet.size());
+        assertSame("The default host object should be in the virtual host set", mockDefaultHost, virtualHostSet.iterator().next());
+
+        // default_host should have ONLY the matching alias (*:80), not the non-matching one (*:8443)
+        assertEquals("vhostAliasData should contain default_host", 1, vhostAliasData.size());
+        List<VHostData> data = vhostAliasData.get("default_host");
+        assertNotNull("There should be a default_host element in the vhostAliasData map", data);
+        assertEquals("VHostData should contain only the matching HTTP port", 1, data.size());
+        assertTrue("VHostData should contain an alias for *:80", data.contains(new VHostData("*", 80)));
+        assertFalse("VHostData should NOT contain an alias for *:8443", data.contains(new VHostData("*", 8443)));
+
+        // Verify warning for missing HTTPS port (443), but NOT for HTTP port (80 is covered)
+        assertFalse("Should NOT have warning about HTTP port (it matches)",
+                    outputMgr.checkForStandardOut("No virtual hosts are configured to accept requests from the webserver http port"));
+        assertTrue("Should have warning about missing HTTPS port 443",
+                   outputMgr.checkForStandardOut("No virtual hosts are configured to accept requests from the webserver https port \\(\\*:443\\)"));
+
+        // Should NOT generate wildcards for explicit default_host
+        assertFalse("Should NOT generate wildcard for HTTPS (explicit config = no wildcards)",
+                    outputMgr.checkForStandardOut("Generated.*wildcard"));
+    }
+
+    @Test
+    public void testCustomHostWithoutDefaultHostPartialMatches() throws Exception {
+        final DynamicVirtualHost mockCustomHost = context.mock(DynamicVirtualHost.class, "custom_host");
+        final ServiceReference<?> mockCustomVhostRef = context.mock(ServiceReference.class, "custom_hostRef");
+
+        setCommonExpectations();
+
+        context.checking(new Expectations() {
+            {
+                allowing(mockLocationAdmin).getServerName();
+                will(returnValue("SystemProvidedServerName"));
+
+                // Return only custom_host (NO default_host in config)
+                allowing(mockBundleContext).getAllServiceReferences(null, "(&(service.factoryPid=com.ibm.ws.http.virtualhost)(|(enabled=true)(id=default_host)))");
+                will(returnValue(new ServiceReference<?>[] { mockCustomVhostRef }));
+
+                // custom_host configuration with only HTTP port matching (HTTPS doesn't match)
+                allowing(mockCustomVhostRef).getProperty("id");
+                will(returnValue("custom_host"));
+                allowing(mockCustomVhostRef).getProperty("hostAlias");
+                will(returnValue(Arrays.asList("myapp.com:80"))); // Only HTTP matches
+                allowing(mockCustomVhostRef).getProperty("allowFromEndpointRef");
+                will(returnValue(null));
+
+                // VirtualHostManager returns both custom_host AND default_host (default_host exists in runtime)
+                allowing(mockVhostMgr).getVirtualHosts();
+                will(returnIterator(mockCustomHost, mockDefaultHost));
+
+                allowing(mockCustomHost).getName();
+                will(returnValue("custom_host"));
+                allowing(mockCustomHost).getAliases();
+                will(returnValue(Arrays.asList("myapp.com:80")));
+
+                // default_host exists in runtime but has no explicit config
+                allowing(mockDefaultHost).getName();
+                will(returnValue("default_host"));
+                allowing(mockDefaultHost).getAliases();
+                will(returnValue(Arrays.asList())); // No aliases from runtime
+            }
+        });
+
+        Map<String, Object> config = new HashMap<String, Object>();
+        setDefaultConfig(config); // webserver ports are 80 and 443
+        Map<String, List<VHostData>> vhostAliasData = new HashMap<String, List<VHostData>>();
+        PluginGenerator pluginGen = new PluginGenerator(config, mockLocationAdmin, mockBundleContext);
+
+        // Process virtual hosts
+        Set<DynamicVirtualHost> virtualHostSet = pluginGen.processVirtualHosts(mockVhostMgr, vhostAliasData, mockEndpointInfo, element);
+
+        // Should have both custom_host and generated default_host
+        assertEquals("Should have two virtual hosts (custom_host + generated default_host)", 2, virtualHostSet.size());
+
+        // Check custom_host has only HTTP matching alias
+        List<VHostData> customData = vhostAliasData.get("custom_host");
+        assertNotNull("custom_host should be in vhostAliasData", customData);
+        assertEquals("custom_host should have 1 matching alias", 1, customData.size());
+        assertTrue("custom_host should contain myapp.com:80", customData.contains(new VHostData("myapp.com", 80)));
+
+        // Check default_host was generated with wildcard ONLY for unmatched HTTPS port
+        List<VHostData> defaultData = vhostAliasData.get("default_host");
+        assertNotNull("default_host should be generated in vhostAliasData", defaultData);
+        assertEquals("default_host should have 1 wildcard alias (only HTTPS)", 1, defaultData.size());
+        assertTrue("default_host should contain wildcard for *:443", defaultData.contains(new VHostData("*", 443)));
+        assertFalse("default_host should NOT contain wildcard for *:80 (already covered)", defaultData.contains(new VHostData("*", 80)));
+
+        // Verify comment about generated HTTPS wildcard only (HTTP is covered by custom_host)
+        assertFalse("Should NOT have comment about HTTP wildcard (covered by custom_host)",
+                    outputMgr.checkForStandardOut("No virtual host had an alias matching the webserver http port"));
+        assertTrue("Should have comment about generated HTTPS wildcard",
+                   outputMgr.checkForStandardOut("No virtual host had an alias matching the webserver https port \\(\\*:443\\)"));
+        assertTrue("Should mention catchall default_host generation",
+                   outputMgr.checkForStandardOut("Generated a catchall default_host"));
+    }
+
     // Helper method to write server.xml for single virtual host tests
     private void writeServerXML(String filename, String endpointId, String host, String httpPort, String httpsPort,
                                 String[] vhostConfig, String webserverPort, String webserverSecurePort) {
