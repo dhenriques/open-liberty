@@ -229,7 +229,7 @@ public class PluginGeneratorTest {
     }
 
     @Test
-    public void testDefaultConfig() throws Exception {
+    public void testCatchAllDefaultHostGeneratesWildcards() throws Exception {
         setCommonVHostExpectations();
         context.checking(new Expectations() {
             {
@@ -263,7 +263,7 @@ public class PluginGeneratorTest {
     }
 
     @Test
-    public void testModifiedDefaultConfig() throws Exception {
+    public void testExplicitDefaultHostWithNoMatchingPortsShowsWarning() throws Exception {
         setCommonVHostExpectations();
         context.checking(new Expectations() {
             {
@@ -1009,7 +1009,7 @@ public class PluginGeneratorTest {
     }
 
     @Test
-    public void testWebserverPortsWithHostAliases() throws Exception {
+    public void testExplicitDefaultHostFiltersAliasesToWebserverPorts() throws Exception {
         final WsResource mockTempWsResource = context.mock(WsResource.class, "tempResource");
         final WsResource mockFinalWsResource = context.mock(WsResource.class, "finalResource");
         final WebApp mockWebApp = context.mock(WebApp.class, "testApp");
@@ -1176,11 +1176,11 @@ public class PluginGeneratorTest {
         assertTrue("Should find VirtualHost entry for HTTP port 49080", foundHttp);
         assertTrue("Should find VirtualHost entry for HTTPS port 49443", foundHttps);
         // rename generated file to leave a clean space for the next test, but keep the file for debug
-        testfile.renameTo(new File(testClassesDir + "/webserverPortsWithHostAliases-plugin-cfg.xml"));
+        testfile.renameTo(new File(testClassesDir + "/explicitDefaultHostFiltersAliases-plugin-cfg.xml"));
     }
 
     @Test
-    public void testWebserverPortsWithCustomVirtualHost() throws Exception {
+    public void testCustomHostWithExplicitDefaultHostFiltersAliases() throws Exception {
         final DynamicVirtualHost mockCustomHost = context.mock(DynamicVirtualHost.class, "custom_host");
         final ServiceReference<?> mockCustomVhostRef = context.mock(ServiceReference.class, "custom_hostRef");
         final WsResource mockTempWsResource2 = context.mock(WsResource.class, "tempResource2");
@@ -1374,7 +1374,7 @@ public class PluginGeneratorTest {
         assertTrue("Should find VirtualHost entry for HTTP port 49080 in custom_host", foundHttp);
         assertTrue("Should find VirtualHost entry for HTTPS port 49443 in custom_host", foundHttps);
         // rename generated file to leave a clean space for the next test, but keep the file for debug
-        testfile.renameTo(new File(testClassesDir + "/webserverPortsWithCustomVirtualHost-plugin-cfg.xml"));
+        testfile.renameTo(new File(testClassesDir + "/customHostWithExplicitDefaultHost-plugin-cfg.xml"));
     }
 
     // Helper method to write server.xml for single virtual host tests
