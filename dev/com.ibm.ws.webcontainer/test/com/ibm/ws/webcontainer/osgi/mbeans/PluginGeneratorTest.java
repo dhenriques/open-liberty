@@ -258,8 +258,8 @@ public class PluginGeneratorTest {
         List<VHostData> data = vhostAliasData.get("default_host");
         assertNotNull("There should be a default_host element in the vhostAliasData map", data);
         assertEquals("There should be two elements in the VHostData", 2, data.size());
-        assertTrue("VHostData should contain an alias for *:80", data.contains(new VHostData("*", 80)));
-        assertTrue("VHostData should contain an alias for *:443", data.contains(new VHostData("*", 443)));
+        assertTrue("VHostData should contain an alias for *:9080", data.contains(new VHostData("*", 9080)));
+        assertTrue("VHostData should contain an alias for *:9443", data.contains(new VHostData("*", 9443)));
     }
 
     @Test
@@ -297,8 +297,8 @@ public class PluginGeneratorTest {
         assertEquals("VHostData should be empty when no aliases match webserver ports", 0, data.size());
 
         // Verify that warning comments are logged about the missing webserver ports
-        assertTrue("comment about missing port 80", outputMgr.checkForStandardOut("No virtual hosts are configured to accept requests from the webserver http port \\(\\*:80\\)"));
-        assertTrue("comment about missing port 443", outputMgr.checkForStandardOut("No virtual hosts are configured to accept requests from the webserver https port \\(\\*:443\\)"));
+        assertTrue("comment about missing port 9080", outputMgr.checkForStandardOut("No virtual hosts are configured to accept requests from the webserver http port \\(\\*:9080\\)"));
+        assertTrue("comment about missing port 9443", outputMgr.checkForStandardOut("No virtual hosts are configured to accept requests from the webserver https port \\(\\*:9443\\)"));
         vhostAliasData.clear();
     }
 
@@ -456,8 +456,8 @@ public class PluginGeneratorTest {
         config.put("pluginInstallRoot", "/opt/IBM/WebSphere/Plugins");
         config.put("httpEndpointRef", "Endpoint1");
         config.put("webserverName", "webserver1");
-        config.put("webserverPort", "80");
-        config.put("webserverSecurePort", "443");
+        config.put("webserverPort", "9080");
+        config.put("webserverSecurePort", "9443");
         config.put("httpEndpointRef", "Endpoint1");
         config.put("httpEndpointRef", "Endpoint1");
         config.put("ipv6Preferred", new Boolean(false));
@@ -1438,14 +1438,14 @@ public class PluginGeneratorTest {
         List<VHostData> defaultData = vhostAliasData.get("default_host");
         assertNotNull("default_host should be generated in vhostAliasData", defaultData);
         assertEquals("default_host should have 2 wildcard aliases", 2, defaultData.size());
-        assertTrue("default_host should contain wildcard for *:80", defaultData.contains(new VHostData("*", 80)));
-        assertTrue("default_host should contain wildcard for *:443", defaultData.contains(new VHostData("*", 443)));
+        assertTrue("default_host should contain wildcard for *:9080", defaultData.contains(new VHostData("*", 9080)));
+        assertTrue("default_host should contain wildcard for *:9443", defaultData.contains(new VHostData("*", 9443)));
 
         // Verify comments about generated catchall default_host
         assertTrue("Should have comment about generated HTTP wildcard",
-                   outputMgr.checkForStandardOut("No virtual host had an alias matching the webserver http port \\(\\*:80\\)"));
+                   outputMgr.checkForStandardOut("No virtual host had an alias matching the webserver http port \\(\\*:9080\\)"));
         assertTrue("Should have comment about generated HTTPS wildcard",
-                   outputMgr.checkForStandardOut("No virtual host had an alias matching the webserver https port \\(\\*:443\\)"));
+                   outputMgr.checkForStandardOut("No virtual host had an alias matching the webserver https port \\(\\*:9443\\)"));
         assertTrue("Should mention catchall default_host generation",
                    outputMgr.checkForStandardOut("Generated a catchall default_host"));
     }
@@ -1470,7 +1470,7 @@ public class PluginGeneratorTest {
                 allowing(mockCustomVhostRef).getProperty("id");
                 will(returnValue("custom_host"));
                 allowing(mockCustomVhostRef).getProperty("hostAlias");
-                will(returnValue(Arrays.asList("myapp.com:80", "myapp.com:443")));
+                will(returnValue(Arrays.asList("myapp.com:9080", "myapp.com:9443")));
                 allowing(mockCustomVhostRef).getProperty("allowFromEndpointRef");
                 will(returnValue(null));
 
@@ -1481,7 +1481,7 @@ public class PluginGeneratorTest {
                 allowing(mockCustomHost).getName();
                 will(returnValue("custom_host"));
                 allowing(mockCustomHost).getAliases();
-                will(returnValue(Arrays.asList("myapp.com:80", "myapp.com:443")));
+                will(returnValue(Arrays.asList("myapp.com:9080", "myapp.com:9443")));
             }
         });
 
@@ -1502,8 +1502,8 @@ public class PluginGeneratorTest {
         List<VHostData> customData = vhostAliasData.get("custom_host");
         assertNotNull("custom_host should be in vhostAliasData", customData);
         assertEquals("custom_host should have 2 matching aliases", 2, customData.size());
-        assertTrue("custom_host should contain myapp.com:80", customData.contains(new VHostData("myapp.com", 80)));
-        assertTrue("custom_host should contain myapp.com:443", customData.contains(new VHostData("myapp.com", 443)));
+        assertTrue("custom_host should contain myapp.com:9080", customData.contains(new VHostData("myapp.com", 9080)));
+        assertTrue("custom_host should contain myapp.com:9443", customData.contains(new VHostData("myapp.com", 9443)));
 
         // Check default_host was NOT generated (all ports handled by custom_host)
         List<VHostData> defaultData = vhostAliasData.get("default_host");
@@ -1523,17 +1523,17 @@ public class PluginGeneratorTest {
             {
                 // Explicit default_host with only ONE port matching (HTTP matches, HTTPS doesn't)
                 allowing(mockDefVhostRef).getProperty("hostAlias");
-                will(returnValue(Arrays.asList("*:80", "*:8443"))); // 80 matches, 8443 doesn't match 443
+                will(returnValue(Arrays.asList("*:9080", "*:8443"))); // 9080 matches, 8443 doesn't match 9443
                 allowing(mockDefVhostRef).getProperty("allowFromEndpointRef");
                 will(returnValue(null));
 
                 one(mockDefaultHost).getAliases();
-                will(returnValue(Arrays.asList("*:80", "*:8443")));
+                will(returnValue(Arrays.asList("*:9080", "*:8443")));
             }
         });
 
         Map<String, Object> config = new HashMap<String, Object>();
-        setDefaultConfig(config); // webserver ports are 80 and 443
+        setDefaultConfig(config); // webserver ports are 9080 and 9443
         Map<String, List<VHostData>> vhostAliasData = new HashMap<String, List<VHostData>>();
         PluginGenerator pluginGen = new PluginGenerator(config, mockLocationAdmin, mockBundleContext);
 
@@ -1542,19 +1542,19 @@ public class PluginGeneratorTest {
         assertEquals("Should have one element in the virtual host set", 1, virtualHostSet.size());
         assertSame("The default host object should be in the virtual host set", mockDefaultHost, virtualHostSet.iterator().next());
 
-        // default_host should have ONLY the matching alias (*:80), not the non-matching one (*:8443)
+        // default_host should have ONLY the matching alias (*:9080), not the non-matching one (*:8443)
         assertEquals("vhostAliasData should contain default_host", 1, vhostAliasData.size());
         List<VHostData> data = vhostAliasData.get("default_host");
         assertNotNull("There should be a default_host element in the vhostAliasData map", data);
         assertEquals("VHostData should contain only the matching HTTP port", 1, data.size());
-        assertTrue("VHostData should contain an alias for *:80", data.contains(new VHostData("*", 80)));
+        assertTrue("VHostData should contain an alias for *:9080", data.contains(new VHostData("*", 9080)));
         assertFalse("VHostData should NOT contain an alias for *:8443", data.contains(new VHostData("*", 8443)));
 
-        // Verify warning for missing HTTPS port (443), but NOT for HTTP port (80 is covered)
+        // Verify warning for missing HTTPS port (9443), but NOT for HTTP port (9080 is covered)
         assertFalse("Should NOT have warning about HTTP port (it matches)",
                     outputMgr.checkForStandardOut("No virtual hosts are configured to accept requests from the webserver http port"));
-        assertTrue("Should have warning about missing HTTPS port 443",
-                   outputMgr.checkForStandardOut("No virtual hosts are configured to accept requests from the webserver https port \\(\\*:443\\)"));
+        assertTrue("Should have warning about missing HTTPS port 9443",
+                   outputMgr.checkForStandardOut("No virtual hosts are configured to accept requests from the webserver https port \\(\\*:9443\\)"));
 
         // Should NOT generate wildcards for explicit default_host
         assertFalse("Should NOT generate wildcard for HTTPS (explicit config = no wildcards)",
@@ -1581,7 +1581,7 @@ public class PluginGeneratorTest {
                 allowing(mockCustomVhostRef).getProperty("id");
                 will(returnValue("custom_host"));
                 allowing(mockCustomVhostRef).getProperty("hostAlias");
-                will(returnValue(Arrays.asList("myapp.com:80"))); // Only HTTP matches
+                will(returnValue(Arrays.asList("myapp.com:9080"))); // Only HTTP matches
                 allowing(mockCustomVhostRef).getProperty("allowFromEndpointRef");
                 will(returnValue(null));
 
@@ -1592,7 +1592,7 @@ public class PluginGeneratorTest {
                 allowing(mockCustomHost).getName();
                 will(returnValue("custom_host"));
                 allowing(mockCustomHost).getAliases();
-                will(returnValue(Arrays.asList("myapp.com:80")));
+                will(returnValue(Arrays.asList("myapp.com:9080")));
 
                 // default_host exists in runtime but has no explicit config
                 allowing(mockDefaultHost).getName();
@@ -1603,7 +1603,7 @@ public class PluginGeneratorTest {
         });
 
         Map<String, Object> config = new HashMap<String, Object>();
-        setDefaultConfig(config); // webserver ports are 80 and 443
+        setDefaultConfig(config); // webserver ports are 9080 and 9443
         Map<String, List<VHostData>> vhostAliasData = new HashMap<String, List<VHostData>>();
         PluginGenerator pluginGen = new PluginGenerator(config, mockLocationAdmin, mockBundleContext);
 
@@ -1617,20 +1617,20 @@ public class PluginGeneratorTest {
         List<VHostData> customData = vhostAliasData.get("custom_host");
         assertNotNull("custom_host should be in vhostAliasData", customData);
         assertEquals("custom_host should have 1 matching alias", 1, customData.size());
-        assertTrue("custom_host should contain myapp.com:80", customData.contains(new VHostData("myapp.com", 80)));
+        assertTrue("custom_host should contain myapp.com:9080", customData.contains(new VHostData("myapp.com", 9080)));
 
         // Check default_host was generated with wildcard ONLY for unmatched HTTPS port
         List<VHostData> defaultData = vhostAliasData.get("default_host");
         assertNotNull("default_host should be generated in vhostAliasData", defaultData);
         assertEquals("default_host should have 1 wildcard alias (only HTTPS)", 1, defaultData.size());
-        assertTrue("default_host should contain wildcard for *:443", defaultData.contains(new VHostData("*", 443)));
-        assertFalse("default_host should NOT contain wildcard for *:80 (already covered)", defaultData.contains(new VHostData("*", 80)));
+        assertTrue("default_host should contain wildcard for *:9443", defaultData.contains(new VHostData("*", 9443)));
+        assertFalse("default_host should NOT contain wildcard for *:9080 (already covered)", defaultData.contains(new VHostData("*", 9080)));
 
         // Verify comment about generated HTTPS wildcard only (HTTP is covered by custom_host)
         assertFalse("Should NOT have comment about HTTP wildcard (covered by custom_host)",
                     outputMgr.checkForStandardOut("No virtual host had an alias matching the webserver http port"));
         assertTrue("Should have comment about generated HTTPS wildcard",
-                   outputMgr.checkForStandardOut("No virtual host had an alias matching the webserver https port \\(\\*:443\\)"));
+                   outputMgr.checkForStandardOut("No virtual host had an alias matching the webserver https port \\(\\*:9443\\)"));
         assertTrue("Should mention catchall default_host generation",
                    outputMgr.checkForStandardOut("Generated a catchall default_host"));
     }
