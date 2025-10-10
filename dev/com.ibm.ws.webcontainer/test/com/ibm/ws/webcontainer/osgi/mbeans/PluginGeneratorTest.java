@@ -229,7 +229,7 @@ public class PluginGeneratorTest {
     }
 
     @Test
-    public void testCatchAllDefaultHostGeneratesWildcards() throws Exception {
+    public void testDefaultConfig() throws Exception {
         setCommonVHostExpectations();
         context.checking(new Expectations() {
             {
@@ -263,7 +263,7 @@ public class PluginGeneratorTest {
     }
 
     @Test
-    public void testExplicitDefaultHostWithNoMatchingPortsShowsWarning() throws Exception {
+    public void testModifiedDefaultConfig() throws Exception {
         setCommonVHostExpectations();
         context.checking(new Expectations() {
             {
@@ -1015,7 +1015,7 @@ public class PluginGeneratorTest {
     }
 
     @Test
-    public void testExplicitDefaultHostFiltersAliasesToWebserverPorts() throws Exception {
+    public void testWebserverPortsWithHostAliases() throws Exception {
         final WsResource mockTempWsResource = context.mock(WsResource.class, "tempResource");
         final WsResource mockFinalWsResource = context.mock(WsResource.class, "finalResource");
         final WebApp mockWebApp = context.mock(WebApp.class, "testApp");
@@ -1186,7 +1186,7 @@ public class PluginGeneratorTest {
     }
 
     @Test
-    public void testCustomHostWithExplicitDefaultHostFiltersAliases() throws Exception {
+    public void testWebserverPortsWithCustomVirtualHost() throws Exception {
         final DynamicVirtualHost mockCustomHost = context.mock(DynamicVirtualHost.class, "custom_host");
         final ServiceReference<?> mockCustomVhostRef = context.mock(ServiceReference.class, "custom_hostRef");
         final WsResource mockTempWsResource2 = context.mock(WsResource.class, "tempResource2");
