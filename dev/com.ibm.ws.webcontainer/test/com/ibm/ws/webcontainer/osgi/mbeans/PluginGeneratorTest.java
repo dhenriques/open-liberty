@@ -1453,8 +1453,8 @@ public class PluginGeneratorTest {
                    outputMgr.checkForStandardOut("No virtual host had an alias matching the webserver http port \\(\\*:9080\\)"));
         assertTrue("Should have comment about generated HTTPS wildcard",
                    outputMgr.checkForStandardOut("No virtual host had an alias matching the webserver https port \\(\\*:9443\\)"));
-        assertTrue("Should mention catchall default_host generation",
-                   outputMgr.checkForStandardOut("Generated a catchall default_host"));
+        assertTrue("Should mention wildcard alias generation for default_host",
+                   outputMgr.checkForStandardOut("wildcard alias was generated for this port in the default_host"));
     }
 
     @Test
@@ -1642,8 +1642,8 @@ public class PluginGeneratorTest {
                     outputMgr.checkForStandardOut("No virtual host had an alias matching the webserver http port"));
         assertTrue("Should have comment about generated HTTPS wildcard",
                    outputMgr.checkForStandardOut("No virtual host had an alias matching the webserver https port \\(\\*:9443\\)"));
-        assertTrue("Should mention catchall default_host generation",
-                   outputMgr.checkForStandardOut("Generated a catchall default_host"));
+        assertTrue("Should mention wildcard alias generation for default_host",
+                   outputMgr.checkForStandardOut("wildcard alias was generated for this port in the default_host"));
     }
 
     @Test
@@ -1768,7 +1768,7 @@ public class PluginGeneratorTest {
 
         // Verify warning about explicit empty default_host
         assertTrue("Should have warning about explicit empty default_host",
-                   outputMgr.checkForStandardOut("default_host is explicitly defined but has no host aliases"));
+                   outputMgr.checkForStandardOut("The default_host is explicitly defined but has no host aliases matching the webserver ports"));
         assertTrue("Should suggest removing default_host or adding aliases",
                    outputMgr.checkForStandardOut("Either remove the default_host definition"));
     }
@@ -1808,15 +1808,13 @@ public class PluginGeneratorTest {
 
         // Verify warning about explicit empty default_host
         assertTrue("Should have warning about explicit empty default_host",
-                   outputMgr.checkForStandardOut("default_host is explicitly defined but has no host aliases"));
+                   outputMgr.checkForStandardOut("The default_host is explicitly defined but has no host aliases matching the webserver ports"));
         assertTrue("Should suggest removing default_host or adding aliases",
                    outputMgr.checkForStandardOut("Either remove the default_host definition"));
 
-        // Verify informational comment mentions only HTTPS port
-        assertTrue("Should mention HTTPS port in comment",
-                   outputMgr.checkForStandardOut("webserverSecurePort=9443"));
-        assertFalse("Should NOT mention HTTP port in generated aliases comment",
-                    outputMgr.checkForStandardOut("webserverPort=9080"));
+        // Verify warning about missing HTTPS port coverage
+        assertTrue("Should warn about no virtual hosts accepting HTTPS port",
+                   outputMgr.checkForStandardOut("No virtual hosts are configured to accept requests from the webserver https port \\(\\*:9443\\)"));
     }
 
     @Test
@@ -1836,8 +1834,8 @@ public class PluginGeneratorTest {
 
         Map<String, Object> config = new HashMap<String, Object>();
         setDefaultConfig(config);
-        // HTTP not configured (property not set at all), HTTPS enabled
-        config.remove("webserverPort");
+        // HTTP not configured (value=0 means not configured), HTTPS enabled
+        config.put("webserverPort", "0");
 
         Map<String, List<VHostData>> vhostAliasData = new HashMap<String, List<VHostData>>();
         PluginGenerator pluginGen = new PluginGenerator(config, mockLocationAdmin, mockBundleContext);

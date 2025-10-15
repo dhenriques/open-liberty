@@ -1199,6 +1199,8 @@ public class PluginGenerator {
                 List<String> vh_aliases = vh.getAliases();
 
                 if (vh_aliases.isEmpty()) {
+                    // Explicit empty alias list - save it to track that we processed this virtual host
+                    vhostAliasData.put(vh_name, new ArrayList<VHostData>());
                     // Do not add any default aliases here: all configurations should be present
                     // based on the transport configuration. Something else is wrong (like
                     // misconfigured transport.. )
